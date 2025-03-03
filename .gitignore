@@ -204,3 +204,6 @@ tests/results/*
 
 # K-develop
 *.kate-swp
+/SmallConvNetwork/Dataset
+/SmallConvNetwork/lightning_logs
+/SmallConvNetwork/model_checkpoints
