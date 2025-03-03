@@ -3,17 +3,19 @@ import onnxruntime
 
 def export_to_onnx(model, input_shape, output_path):
     """
-    Export a PyTorch model to ONNX format
+    Export PyTorch model to ONNX format
     
     Args:
-        model: The PyTorch model to export
-        input_shape: The shape of the input tensor (batch_size, channels, height, width)
-        output_path: Path where the ONNX model will be saved
+        model: PyTorch model
+        input_shape: Tuple of input dimensions (batch_size, channels, height, width)
+        output_path: Path to save the ONNX model
     
     Returns:
-        str: Path to the exported ONNX model
+        Path to the exported ONNX model
     """
-    # Create a dummy input tensor
+    model.eval()
+    
+    # Create dummy input tensor
     dummy_input = torch.randn(input_shape)
     
     # Export the model to ONNX
