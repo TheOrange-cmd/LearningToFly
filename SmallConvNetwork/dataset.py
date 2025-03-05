@@ -9,7 +9,7 @@ class CustomImageDataset(Dataset):
     def __init__(self, image_dir, width, height, grid_lines, danger_levels, device="cpu"):
         self.image_paths = sorted(glob.glob(image_dir + "/*.jpg"))
         self.label_paths = sorted(glob.glob(image_dir.replace("images" , "labels") + "/*.txt"))
-        print(f"[CustomImageDataset] Found {len(self.image_paths)} images and {len(self.label_paths)} labels")
+        # print(f"[CustomImageDataset] Found {len(self.image_paths)} images and {len(self.label_paths)} labels")
         self.width = width
         self.height = height
         self.grid_lines = grid_lines
