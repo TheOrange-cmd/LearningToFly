@@ -190,7 +190,6 @@ def plot_image(sample_image, sample_danger, grid_lines, grid=False):
 
     plt.xlim(0, width)
     plt.ylim(height, 0)
-    plt.show()
 
 image_dir_train = "./SmallConvNetwork/dataset/images/train"
 image_dir_val = "./SmallConvNetwork/dataset/images/val"
@@ -202,8 +201,9 @@ height = 240
 grid_lines = [0,0.2, 0.4,0.6, 0.8,1]
 grid_lines = [line*width for line in grid_lines]
 
-train = True
-save = True
+train = False
+save_model = False
+save_video = True
 
 data_module = ObjectDetectionDataModule(image_dir_train,image_dir_val, width, height)
 model = ObjectDetectionModel(grid_lines)
@@ -212,9 +212,9 @@ if train:
     trainer = pl.Trainer(max_epochs=10, check_val_every_n_epoch=1, log_every_n_steps=10)
     trainer.fit(model, data_module)
 else:
-    model = ObjectDetectionModel.load_from_checkpoint("lightning_logs/version_24/checkpoints/epoch=9-step=890.ckpt", grid_lines=grid_lines)
+    model = ObjectDetectionModel.load_from_checkpoint("lightning_logs/version_0/checkpoints/epoch=9-step=160.ckpt", grid_lines=grid_lines)
 
-if save:
+if save_model:
     model.to_onnx("./SmallConvNetwork/model_rgb.onnx", torch.randn(1, 3, width, height))
 
 # plot a video to test the predictions
@@ -230,19 +230,21 @@ def update(frame):
     ax.clear()  # clear the axes for the new frame
     image = torchvision.io.read_image(image_paths[frame]).float()
     start_frame = time.time()
-    print(image.unsqueeze(0).shape)
     sample_danger = model(image.unsqueeze(0)).squeeze(0)
     print(f"{1 / (time.time() - start_frame):.1f} fps")
 
-    # Call the modified plot_image function that accepts an axis as parameter
-    # Instead of calling plt.show() inside plot_image, pass 'ax' so that the figure updates.
+    # Call the plot_image function to update the plot
     plot_image(sample_image=image, sample_danger=sample_danger, grid_lines=grid_lines, grid=False)
     ax.set_xlim(0, width)
     ax.set_ylim(height, 0)
     return ax
 
-# Create the animation
 ani = animation.FuncAnimation(fig, update, frames=len(image_paths), interval=100)
+
+if save_video:
+    # Save the animation to an MP4 file using ffmpeg writer
+    ani.save('./SmallConvNetwork/output.mp4', writer='ffmpeg', fps=10)
+
 plt.show()
 
 
