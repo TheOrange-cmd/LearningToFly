@@ -1,0 +1,91 @@
+<!DOCTYPE module SYSTEM "module.dtd">
+<module name="obstacle_avoider_obstacle_detection" dir="computer_vision/obstacle_detection">
+  <doc>
+    <description>
+      Simple grid-based obstacle detection using ONNX2C model
+    </description>
+  </doc>
+
+  <settings>
+    <dl_settings>
+      <dl_settings name="obstacle">
+        <dl_setting var="obstacle_detection.enabled" min="0" max="1" step="1" 
+              shortname="obst_enable" module="obstacle_detection"
+              values="OFF|ON"/>
+        <dl_setting var="obstacle_detection.stream_enabled" min="0" max="1" step="1" 
+                    shortname="stream_enable" module="obstacle_detection"
+                    values="OFF|ON"/>
+      </dl_settings>
+    </dl_settings>
+  </settings>
+
+  <header>
+    <file name="include/obstacle_detection.h"/>
+    <file name="include/video_stream.h"/>
+    <file name="include/image_convert.h"/>
+    <file name="include/inference.h"/>
+  </header>
+  <init fun="obstacle_detection_init()"/>
+  <periodic fun="obstacle_detection_periodic()" freq="30"/>
+
+  <makefile target="ap|nps">
+    <!-- Setup Video Feed -->
+    <define name="VIDEO_THREAD" value="1"/>
+    <define name="OBSTACLE_DETECTION_CAMERA" value="front_camera"/>
+
+    <!-- Include the video streaming dependencies -->
+    <file name="rtp.c" dir="modules/computer_vision/lib/encoding"/>
+
+    <!-- Define the network connection -->
+    <raw>
+      OBSTACLE_RTP_PORT_OUT ?= 5100
+      CFLAGS += -DOBSTACLE_RTP_PORT_OUT=$(OBSTACLE_RTP_PORT_OUT)
+    </raw>
+
+    <!-- Set port for custom stream -->
+    <define name="OBSTACLE_RTP_PORT_OUT" value="5100"/>
+    
+    <!-- Include module source files -->
+    <file name="src/obstacle_detection.c"/>
+    <file name="src/video_stream.c"/>
+    <file name="src/image_convert.c"/>
+    <file name="src/inference.c"/>
+    <file name="src/model_rgb.c"/>
+
+    <!-- Include paths -->
+    <flag name="CFLAGS" value="I$(PAPARAZZI_HOME)/sw/airborne/modules/computer_vision/obstacle_detection/include"/>
+    
+    <!-- Add math library -->
+    <flag name="LDFLAGS" value="lm"/>
+
+    <!-- Computer vision dependencies -->
+    <flag name="CFLAGS" value="I$(PAPARAZZI_HOME)/sw/airborne/modules/computer_vision"/>
+    <flag name="CFLAGS" value="I$(PAPARAZZI_HOME)/sw/airborne/modules/computer_vision/lib"/>
+
+    <!-- Add pthread library -->
+    <flag name="LDFLAGS" value="pthread"/>
+  </makefile>
+  <makefile target="ap">
+      <!-- Real hardware specific stuff -->
+      <configure name="VISION_LED" value="5"/>
+      <define name="CAMERA_CAPTURE_MODE" value="1"/>
+
+      <!-- Add explicit dependencies -->
+      <raw>
+          $(TARGET).CFLAGS += -DUSE_VIDEO_THREAD
+      </raw>
+      
+      <!-- Maybe add these to ensure proper camera initialization -->
+      <define name="MT9F002_INITIAL_OFFSET_X" value="2048"/>
+      <define name="MT9F002_INITIAL_OFFSET_Y" value="2048"/>
+  </makefile>
+
+  <makefile target="nps">
+      <!-- Simulator specific configuration -->
+      <define name="VIDEO_CAPTURE_PATH_GAZEBO" value="front_camera"/>
+      <define name="USE_VIDEO_THREAD"/>
+      <!-- Maybe add these to prevent MT9V117 initialization -->
+      <define name="SIMULATE_MT9F002"/>
+      <define name="USE_GAZEBO_CAM"/>
+  </makefile>
+</module>

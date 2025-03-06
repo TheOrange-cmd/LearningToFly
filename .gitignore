@@ -208,3 +208,6 @@ tests/results/*
 /SmallConvNetwork/lightning_logs
 /SmallConvNetwork/model_checkpoints
 /SmallConvNetwork/build
+/SmallConvNetwork/checkpoints
+/SmallConvNetwork/dataset
+/SmallConvNetwork/dataset_uyvy
