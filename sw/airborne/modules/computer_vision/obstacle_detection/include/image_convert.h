@@ -7,13 +7,17 @@
 // Initialize the YUV to RGB conversion lookup tables
 bool init_yuv_conversion(void);
 
+// Separate conversion functions for front and bottom cameras
+bool convert_uyvy_to_rgb_front(const uint8_t* uyvy_data, int width, int height, float** rgb_output);
+bool convert_uyvy_to_rgb_bottom(const uint8_t* uyvy_data, int width, int height, float** rgb_output);
+
 // Convert UYVY format to RGB
 // Input: UYVY data, width, height
 // Output: RGB float array (allocated inside function)
 // Returns: true on success, false on failure
-bool convert_uyvy_to_rgb(const uint8_t* uyvy_data,
-                        int width,
-                        int height,
-                        float** rgb_output);
+// bool convert_uyvy_to_rgb(const uint8_t* uyvy_data, 
+//   int width, 
+//   int height, 
+//   float** rgb_output);
 
 #endif // IMAGE_CONVERT_H

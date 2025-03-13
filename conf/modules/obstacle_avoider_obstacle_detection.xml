@@ -8,9 +8,12 @@
 
   <settings>
     <dl_settings>
-      <dl_settings name="obstacle">
-        <dl_setting var="obstacle_detection.enabled" min="0" max="1" step="1" 
-              shortname="obst_enable" module="obstacle_detection"
+      <dl_settings name="detection">
+        <dl_setting var="obstacle_detection.front_enabled" min="0" max="1" step="1" 
+              shortname="front_enable" module="obstacle_detection"
+              values="OFF|ON"/>
+        <dl_setting var="obstacle_detection.bottom_enabled" min="0" max="1" step="1" 
+              shortname="bottom_enable" module="obstacle_detection"
               values="OFF|ON"/>
         <dl_setting var="obstacle_detection.stream_enabled" min="0" max="1" step="1" 
                     shortname="stream_enable" module="obstacle_detection"
@@ -24,22 +27,27 @@
     <file name="include/video_stream.h"/>
     <file name="include/image_convert.h"/>
     <file name="include/inference.h"/>
+    <file name="include/border_model_wrapper.h"/>
   </header>
+
   <init fun="obstacle_detection_init()"/>
-  <periodic fun="obstacle_detection_periodic()" freq="30"/>
+  <periodic fun="obstacle_detection_periodic()" freq="10"/>
 
   <makefile target="ap|nps">
     <!-- Setup Video Feed -->
     <define name="VIDEO_THREAD" value="1"/>
     <define name="OBSTACLE_DETECTION_CAMERA" value="front_camera"/>
+    <define name="OBSTACLE_DETECTION_BOTTOM_CAMERA" value="bottom_camera"/>
 
     <!-- Include the video streaming dependencies -->
     <file name="rtp.c" dir="modules/computer_vision/lib/encoding"/>
 
     <!-- Define the network connection -->
     <raw>
-      OBSTACLE_RTP_PORT_OUT ?= 5100
-      CFLAGS += -DOBSTACLE_RTP_PORT_OUT=$(OBSTACLE_RTP_PORT_OUT)
+      OBSTACLE_FRONT_RTP_PORT ?= 5100
+      OBSTACLE_BOTTOM_RTP_PORT ?= 5101
+      CFLAGS += -DOBSTACLE_FRONT_RTP_PORT=$(OBSTACLE_FRONT_RTP_PORT)
+      CFLAGS += -DOBSTACLE_BOTTOM_RTP_PORT=$(OBSTACLE_BOTTOM_RTP_PORT)
     </raw>
 
     <!-- Set port for custom stream -->
@@ -50,7 +58,8 @@
     <file name="src/video_stream.c"/>
     <file name="src/image_convert.c"/>
     <file name="src/inference.c"/>
-    <file name="src/model_rgb.c"/>
+    <file name="src/obstacle_model_wrapper.c"/>
+    <file name="src/border_model_wrapper.c"/>
 
     <!-- Include paths -->
     <flag name="CFLAGS" value="I$(PAPARAZZI_HOME)/sw/airborne/modules/computer_vision/obstacle_detection/include"/>

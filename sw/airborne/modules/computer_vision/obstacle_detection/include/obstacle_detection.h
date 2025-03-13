@@ -3,28 +3,39 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/time.h>  
+#include "modules/computer_vision/lib/vision/image.h"
+#include "video_stream.h"  
 
-// Bools for enabling and disabling obstacle detection and streaming
+// Configuration and state
 struct obstacle_detection_t {
-    bool enabled;
+    bool front_enabled;
+    bool bottom_enabled;
     bool stream_enabled;
 };
 
-// External declaration
-extern struct obstacle_detection_t obstacle_detection;
-
-struct shared_data_t {
+// Shared data for each camera
+struct camera_data_t {
     bool frame_ready;
     struct image_t* frame;
     uint32_t frames_received;
     uint32_t frames_processed;
-    struct timeval last_frame_time;
+    struct timeval last_frame_received_time;
+    struct timeval last_frame_processed_time;
+    float received_fps;
+    float processed_fps;
+    struct stream_context_t stream_ctx;
+    pthread_mutex_t frame_mutex;
 };
 
+// External declarations
+extern struct obstacle_detection_t obstacle_detection;
+extern struct camera_data_t front_camera_data;
+extern struct camera_data_t bottom_camera_data;
+
 // Function declarations
-extern struct shared_data_t shared_data;
-extern bool obstacle_detection_init(void);
-extern void obstacle_detection_periodic(void);
-extern void obstacle_detection_cleanup(void);
-struct image_t* video_callback(struct image_t *img, uint8_t camera_id);  
+bool obstacle_detection_init(void);
+void obstacle_detection_periodic(void);
+void obstacle_detection_cleanup(void);
+
 #endif // OBSTACLE_DETECTION_H
