@@ -3,7 +3,7 @@ import torchvision.io
 import glob
 import matplotlib.pyplot as plt
 import torch
-from CNN import cell_contains_bbox, convert_coordinates
+from CNN import generate_danger_level_list
 import albumentations as A
 import time
 
@@ -39,7 +39,8 @@ class CustomImageDataset(Dataset):
         if image.shape[-2:] != (self.width, self.height):
             raise ValueError(f"Image shape {image.shape} of {self.image_paths[idx]} is not equal to the expected shape ({self.width}, {self.height})")
         bboxes = self.get_bboxes(self.label_paths[idx])
-        cell_danger_levels = torch.tensor(cell_contains_bbox(bboxes, self.grid_lines, self.width, self.height)).float()
+        cell_danger_levels = torch.tensor(
+            generate_danger_level_list(bboxes, self.grid_lines, self.width, self.height)).float()
         return image, cell_danger_levels, bboxes
 
 
@@ -49,9 +50,12 @@ sample = 50
 
 transform = A.Compose(
     [
-        A.Affine(p=1, scale=(1.3,1.5), translate_percent=(-0.1, 0.1), shear=(-2, 2)),
+        A.Affine(p=1, scale=(1., 1.5), translate_percent=(-0.1, 0.1), shear=(-2, 2), rotate=(-10, 10)),
+        A.RandomBrightnessContrast(p=0.5, brightness_limit=0.2, contrast_limit=0.2),
+        A.HueSaturationValue(p=0.5, sat_shift_limit=5, hue_shift_limit=5, val_shift_limit=5),
     ],
-    bbox_params=A.BboxParams(format='yolo'))
+    bbox_params=A.BboxParams(format='yolo')
+)
 
 for sample in range(len(dataset)):
     # Get the original image and bounding boxes
@@ -60,6 +64,7 @@ for sample in range(len(dataset)):
 
     # Apply transformation
     start = time.time()
+    print(original_image.shape)
     transformed = transform(image=original_image, bboxes=bboxes)
     transformed_image = transformed['image']
     print(f"transform took {time.time()-start} seconds")
@@ -73,6 +78,7 @@ for sample in range(len(dataset)):
     ax1.set_title("Original Image")
     for bbox in bboxes:
         x, y, w, h = bbox[:4]
+        print(bbox)
         x = x*width
         y = y*height
         w = w*width
