@@ -211,3 +211,11 @@ tests/results/*
 /SmallConvNetwork/checkpoints
 /SmallConvNetwork/dataset
 /SmallConvNetwork/dataset_uyvy
+/BottomCamDetector/20190121-143427
+/BottomCamDetector/20190121-152231
+/BottomCamDetector/experiments
+/BottomCamDetector/merged
+/BottomCamDetector/results
+/BottomCamDetector/test_verified_images
+/BottomCamDetector/verified_images
+/verified_images
