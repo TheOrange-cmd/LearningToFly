@@ -219,3 +219,4 @@ tests/results/*
 /BottomCamDetector/test_verified_images
 /BottomCamDetector/verified_images
 /verified_images
+/.vscode

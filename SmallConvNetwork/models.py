@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
+from dataset import CustomImageDataset, CustomImageDatasetUYVY
+from utils import DangerLevelConfig
 
 class ObjectDetectionModel(pl.LightningModule):
     def __init__(self, grid_lines, danger_levels, input_shape=(3, 240, 520), learning_rate=0.001):
@@ -114,9 +116,9 @@ class SafetyLosses:
         'balanced': {
             'class_weights': [1.0, 1.5, 2.0],
             'penalty_matrix': [
-                [0.0, 2.0, 4.0],
-                [1.0, 0.0, 2.0],
-                [2.0, 1.0, 0.0]
+                [0.0, 2.0, 4.0],  # Penalties for predicting safe when actually warning/danger
+                [1.0, 0.0, 2.0],  # Penalties for predicting warning when actually safe/danger
+                [2.0, 1.0, 0.0]   # Penalties for predicting danger when actually safe/warning
             ],
             'smoothness_weight': 0.1
         },
@@ -160,15 +162,15 @@ class SafetyLosses:
                 self.smoothness_weight = config['smoothness_weight']
                 
             def forward(self, pred, target):
-                # pred and target shape: [batch_size, 3, grid_height, grid_width]
+                # Apply sigmoid to get probabilities
                 pred_probs = torch.sigmoid(pred)
                 
-                # Reshape inputs to [N, C] where N = batch_size * grid_height * grid_width
+                # Reshape to [N, C]
                 batch_size, num_classes, height, width = pred.shape
                 pred_flat = pred_probs.permute(0, 2, 3, 1).reshape(-1, num_classes)
                 target_flat = target.permute(0, 2, 3, 1).reshape(-1, num_classes)
                 
-                # Apply class weights
+                # Basic cross-entropy with class weights
                 weights = self.class_weights.to(pred.device)
                 weighted_bce = F.binary_cross_entropy(
                     pred_flat, target_flat, 
@@ -176,21 +178,35 @@ class SafetyLosses:
                     reduction='none'
                 )
                 
-                # Hierarchy violations penalty
-                pred_classes = (pred_flat > 0.5).float()
-                hierarchy_penalty = torch.zeros_like(weighted_bce)
+                # Hierarchical penalty
+                pred_classes = pred_flat.argmax(dim=1)  # Get predicted class
+                target_classes = target_flat.argmax(dim=1)  # Get true class
                 
                 penalty_matrix = self.penalty_matrix.to(pred.device)
-                for i in range(3):  # predicted class
-                    for j in range(3):  # actual class
-                        mask = (pred_classes[:, i] == 1) & (target_flat[:, j] == 1)
-                        hierarchy_penalty[mask, i] += penalty_matrix[i, j]
+                hierarchy_penalty = penalty_matrix[pred_classes, target_classes]
                 
-                # Smoothness term (between adjacent classes)
-                smoothness_loss = torch.abs(pred_flat[:, 2] - pred_flat[:, 1]) * self.smoothness_weight
+                # Smoothness regularization (optional with mutually exclusive classes)
+                if self.smoothness_weight > 0:
+                    # Consider adjacent predictions in the grid
+                    pred_grid = pred_probs.permute(0, 2, 3, 1)  # [batch, height, width, classes]
+                    smoothness_loss = 0.0
+                    
+                    # Horizontal smoothness
+                    if width > 1:
+                        diff_h = torch.abs(pred_grid[:, :, 1:, :] - pred_grid[:, :, :-1, :])
+                        smoothness_loss += diff_h.mean()
+                    
+                    # Vertical smoothness (if we had multiple rows)
+                    if height > 1:
+                        diff_v = torch.abs(pred_grid[:, 1:, :, :] - pred_grid[:, :-1, :, :])
+                        smoothness_loss += diff_v.mean()
+                    
+                    smoothness_loss *= self.smoothness_weight
+                else:
+                    smoothness_loss = 0.0
                 
-                # Combine losses and reshape back to original dimensions
-                total_loss = (weighted_bce + hierarchy_penalty).mean() + smoothness_loss.mean()
+                # Combine losses
+                total_loss = weighted_bce.mean() + hierarchy_penalty.mean() + smoothness_loss
                 
                 return total_loss
                 
@@ -460,11 +476,26 @@ class LightweightGridDetectionModel(pl.LightningModule):
         }
         
     def forward(self, x):
-        # Convolutional feature extraction
-        x = self.conv_features(x)
+        print(f"Model input shape: {x.shape}")
         
-        # Classification - outputs [batch, danger_levels, grid_x, grid_y]
+        # Normalize input
+        x = x.float() / 255.0
+        print(f"After normalization: {x.shape}")
+        
+        x = self.stage1(x)
+        print(f"After stage1: {x.shape}")
+        
+        x = self.stage2(x)
+        print(f"After stage2: {x.shape}")
+        
+        x = self.stage3(x)
+        print(f"After stage3: {x.shape}")
+        
+        x = self.pool(x)
+        print(f"After pool: {x.shape}")
+        
         x = self.classifier(x)
+        print(f"After classifier: {x.shape}")
         
         return x
     
@@ -536,3 +567,332 @@ class LightweightGridDetectionModel(pl.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+    
+# class LightweightGridDetectionModelUYVY(pl.LightningModule):
+#     def __init__(self, grid_lines, input_shape=(1, 240, 520*2), learning_rate=0.001, hierarchical_config='balanced'):
+#         super().__init__()
+        
+#         self.grid_x = len(grid_lines[0]) - 1
+#         self.grid_y = len(grid_lines[1]) - 1
+#         self.grid_lines = grid_lines
+#         self.danger_config = DangerLevelConfig()
+#         self.learning_rate = learning_rate
+
+#         # Process features with fixed dimensions
+#         self.stage1 = nn.Sequential(
+#             nn.Conv2d(1, 16, kernel_size=(3, 4), stride=(1, 4), padding=(1, 0)),
+#             nn.ReLU()
+#         )
+        
+#         self.stage2 = nn.Sequential(
+#             nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+#             nn.ReLU(),
+#             nn.MaxPool2d(2, 2)
+#         )
+        
+#         self.stage3 = nn.Sequential(
+#             nn.Conv2d(32, 16, kernel_size=3, stride=2, padding=1),
+#             nn.ReLU()
+#         )
+        
+#         self.pool = nn.AdaptiveAvgPool2d((5, 1))
+        
+#         self.classifier = nn.Sequential(
+#             nn.Conv2d(16, len(self.danger_config.LEVEL_DEFINITIONS), kernel_size=1),
+#             nn.Sigmoid()
+#         )
+        
+#         self.loss_fn = SafetyLosses.hierarchical_loss(hierarchical_config)
+#         self.loss_fn_name = f'hierarchical_{hierarchical_config}'
+
+#     def _debug_shape(self, x, name):
+#         # print(f"\nDebug {name}:")
+#         # print(f"Shape: {x.shape}")
+#         # print(f"Type: {x.dtype}")
+#         # print(f"Device: {x.device}")
+#         # print(f"Range: [{x.min().item():.3f}, {x.max().item():.3f}]")
+#         if torch.isnan(x).any():
+#             print("WARNING: Contains NaN values!")
+#         if torch.isinf(x).any():
+#             print("WARNING: Contains Inf values!")
+#         return x
+
+#     def forward(self, x):
+#         if len(x.shape) == 3:
+#             x = x.unsqueeze(1)
+        
+#         x = x.float() / 255.0
+#         x = self.stage1(x)
+#         x = self.stage2(x)
+#         x = self.stage3(x)
+#         x = self.pool(x)
+#         x = self.classifier(x)
+        
+#         return x
+
+#     def training_step(self, batch, batch_idx):
+#         # print(f"\n=== Starting training step {batch_idx} ===")
+#         images, targets = batch
+#         # print(f"Batch input shape: {images.shape}")
+#         # print(f"Batch target shape: {targets.shape}")
+        
+#         outputs = self(images)
+#         loss = self.loss_fn(outputs, targets)
+        
+#         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
+#         return loss
+    
+#     def validation_step(self, batch, batch_idx):
+#         x, y = batch
+#         y_hat = self(x)
+#         val_loss = self.loss_fn(y_hat, y)
+        
+#         # Reshape predictions and targets to 2D: (batch*height*width, n_classes)
+#         y_hat_flat = y_hat.permute(0, 2, 3, 1).reshape(-1, y_hat.shape[1])
+#         y_flat = y.permute(0, 2, 3, 1).reshape(-1, y.shape[1])
+        
+#         # Get predicted classes (after sigmoid)
+#         pred_probs = torch.sigmoid(y_hat_flat)
+#         pred_classes = (pred_probs > 0.5).float()
+        
+#         # Calculate per-class metrics
+#         metrics = {}
+#         for level in self.danger_config.LEVEL_DEFINITIONS:
+#             level_name = level["name"].lower()
+#             level_idx = level["level"]
+            
+#             # Get masks for true positives, false positives, etc.
+#             true_positives = ((pred_classes[:, level_idx] == 1) & (y_flat[:, level_idx] == 1)).sum()
+#             true_negatives = ((pred_classes[:, level_idx] == 0) & (y_flat[:, level_idx] == 0)).sum()
+#             false_positives = ((pred_classes[:, level_idx] == 1) & (y_flat[:, level_idx] == 0)).sum()
+#             false_negatives = ((pred_classes[:, level_idx] == 0) & (y_flat[:, level_idx] == 1)).sum()
+            
+#             # Calculate metrics
+#             accuracy = (true_positives + true_negatives) / len(y_flat)
+#             precision = true_positives / (true_positives + false_positives + 1e-8)
+#             recall = true_positives / (true_positives + false_negatives + 1e-8)
+#             f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
+            
+#             # Store metrics
+#             metrics.update({
+#                 f'val_accuracy_{level_name}': accuracy,
+#                 f'val_precision_{level_name}': precision,
+#                 f'val_recall_{level_name}': recall,
+#                 f'val_f1_{level_name}': f1
+#             })
+        
+#         # Calculate critical misclassification rate (dangerous regions classified as safe)
+#         dangerous_as_safe = ((pred_classes[:, self.danger_config.LEVELS['SAFE']] == 1) & 
+#                             (y_flat[:, self.danger_config.LEVELS['DANGER']] == 1)).sum()
+#         total_dangerous = (y_flat[:, self.danger_config.LEVELS['DANGER']] == 1).sum()
+#         critical_misclass_rate = dangerous_as_safe / (total_dangerous + 1e-8)
+        
+#         # Calculate class distribution in this batch
+#         class_distribution = {
+#             level["name"].lower(): (y_flat[:, level["level"]] == 1).sum() / len(y_flat)
+#             for level in self.danger_config.LEVEL_DEFINITIONS
+#         }
+        
+#         # Log everything
+#         self.log('val_loss', val_loss, prog_bar=True)
+#         self.log('val_critical_misclass', critical_misclass_rate, prog_bar=True)
+        
+#         for name, value in metrics.items():
+#             self.log(name, value, prog_bar=True)
+        
+#         for class_name, dist in class_distribution.items():
+#             self.log(f'val_dist_{class_name}', dist)
+        
+#         return {
+#             'val_loss': val_loss,
+#             'val_critical_misclass': critical_misclass_rate,
+#             **metrics,
+#             'class_distribution': class_distribution
+#         }
+#     def configure_optimizers(self):
+#         return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+
+class LightweightGridDetectionModelUYVY(pl.LightningModule):
+    def __init__(self, grid_lines, input_shape=(1, 240, 520*2), learning_rate=0.001):
+        super().__init__()
+        
+        self.grid_x = len(grid_lines[0]) - 1
+        self.grid_y = len(grid_lines[1]) - 1
+        self.grid_lines = grid_lines
+        self.danger_config = DangerLevelConfig()
+        self.learning_rate = learning_rate
+        
+        # Network architecture
+        self.stage1 = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=(3, 4), stride=(1, 4), padding=(1, 0)),
+            nn.ReLU()
+        )
+        
+        self.stage2 = nn.Sequential(
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+        )
+        
+        self.stage3 = nn.Sequential(
+            nn.Conv2d(32, 16, kernel_size=3, stride=2, padding=1),
+            nn.ReLU()
+        )
+        
+        self.pool = nn.AdaptiveAvgPool2d((5, 1))
+        
+        self.classifier = nn.Sequential(
+            nn.Conv2d(16, len(self.danger_config.LEVEL_DEFINITIONS), kernel_size=1)
+        )
+        
+        # Initialize base weights
+        self.register_buffer('base_weights', torch.tensor([1.0, 3.0, 2.0]))
+
+    def forward(self, x):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(1)
+        
+        x = x.float() / 255.0
+        x = self.stage1(x)
+        x = self.stage2(x)
+        x = self.stage3(x)
+        x = self.pool(x)
+        x = self.classifier(x)
+        
+        return x
+    
+    def calculate_f1_loss(self, y_pred, y_true):
+        """
+        Calculate F1 score as a differentiable loss function
+        """
+        # Apply sigmoid to get probabilities
+        probs = torch.sigmoid(y_pred)
+        
+        # Calculate F1 score components
+        tp = torch.sum(probs * y_true, dim=(0, 2, 3))
+        fp = torch.sum(probs * (1 - y_true), dim=(0, 2, 3))
+        fn = torch.sum((1 - probs) * y_true, dim=(0, 2, 3))
+        
+        # Calculate precision and recall
+        precision = tp / (tp + fp + 1e-8)
+        recall = tp / (tp + fn + 1e-8)
+        
+        # Calculate F1 score
+        f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
+        
+        # Return negative mean F1 score (since we're minimizing)
+        return -f1.mean()
+
+    def _get_current_weights(self):
+        epoch = self.current_epoch
+        # Reduce the danger multiplier to allow more safe predictions
+        danger_multiplier = min(3.0, 1.0 + epoch * 0.3)  # Reduced from 5.0
+        weights = self.base_weights.clone()
+        weights[1:] *= danger_multiplier
+        return weights
+
+    def training_step(self, batch, batch_idx):
+        images, targets = batch
+        outputs = self(images)
+        
+        # Calculate F1-based loss
+        loss = self.calculate_f1_loss(outputs, targets)
+        
+        # Log just the overall loss
+        self.log('train_loss', loss, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        
+        # Calculate F1-based loss
+        val_loss = self.calculate_f1_loss(y_hat, y)
+        
+        # Calculate critical misclassification rate
+        with torch.no_grad():
+            probs = torch.sigmoid(y_hat)
+            pred_classes = (probs > 0.5).float()
+            dangerous_as_safe = ((pred_classes[:, self.danger_config.LEVELS['SAFE']] == 1) & 
+                            (y[:, self.danger_config.LEVELS['DANGER']] == 1)).float().mean()
+        
+        self.log('val_loss', val_loss, prog_bar=True)
+        self.log('val_critical_misclass', dangerous_as_safe, prog_bar=True)
+        
+        return {
+            'val_loss': val_loss,
+            'val_critical_misclass': dangerous_as_safe
+        }
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='min',
+            factor=0.7,
+            patience=10,
+            min_lr=1e-6,
+            verbose=True
+        )
+        
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss",  # Monitoring F1-based loss
+                "frequency": 1
+            }
+        }
+
+    
+import pytorch_lightning as pl
+from torch.utils.data import DataLoader
+import torch
+
+class ObjectDetectionDataModuleUYVY(pl.LightningDataModule):
+    def __init__(self, image_dir_train, image_dir_val, width, height, grid_lines, 
+                 batch_size=8, device="cpu"):
+        super(ObjectDetectionDataModuleUYVY, self).__init__()
+        self.image_dir_train = image_dir_train
+        self.image_dir_val = image_dir_val
+        self.width = width  # Original width
+        self.height = height
+        self.batch_size = batch_size
+        self.grid_lines = grid_lines
+        self.device = device
+
+    def setup(self, stage=None):
+        self.train_dataset = CustomImageDatasetUYVY(
+            self.image_dir_train, 
+            self.width,
+            self.height, 
+            self.grid_lines,
+            self.device
+        )
+        
+        self.val_dataset = CustomImageDatasetUYVY(
+            self.image_dir_val, 
+            self.width,
+            self.height, 
+            self.grid_lines,
+            self.device
+        )
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset, 
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True if torch.cuda.is_available() else False
+        )
+    
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset, 
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True if torch.cuda.is_available() else False
+        )
+
