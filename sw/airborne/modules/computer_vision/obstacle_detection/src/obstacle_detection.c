@@ -6,11 +6,15 @@
 #include <pthread.h>
 #include <stdarg.h>
 
+#include "debug_print.h"
+DEFINE_DEBUG_PRINT("OBSDET")
+
 // Paparazzi includes
 #include "modules/computer_vision/cv.h"
 #include "modules/computer_vision/lib/vision/image.h"
 #include "modules/computer_vision/lib/encoding/rtp.h"
 #include "modules/computer_vision/lib/encoding/jpeg.h"
+#include "modules/core/abi.h"
 
 // Project includes
 #include "video_stream.h"  // For streaming functionality
@@ -44,7 +48,7 @@
 #define OBSTACLE_BOTTOM_RTP_PORT 5101
 #endif
 
-static void debug_print(const char* format, ...);
+// static void debug_print(const char* format, ...);
 static struct image_t* front_camera_callback(struct image_t *img, uint8_t camera_id);
 static struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camera_id);
 
@@ -59,27 +63,6 @@ struct camera_data_t front_camera_data = {0};
 struct camera_data_t bottom_camera_data = {0};
 static struct video_listener* front_video_listener = NULL;
 static struct video_listener* bottom_video_listener = NULL;
-
-static void debug_print(const char* format, ...) {
-    va_list args;
-    va_start(args, format);
-    
-    #ifdef TARGET_AP
-        // On actual drone, use ulogger
-        char command[MAX_LOG_LENGTH + 32];
-        vsnprintf(command, sizeof(command), format, args);
-        snprintf(command, sizeof(command), "ulogger -t %s '%s'", DEBUG_TAG, command);
-        system(command);
-    #else
-        // In simulation (NPS/Gazebo), use printf
-        printf("[%s] ", DEBUG_TAG);
-        vprintf(format, args);
-        printf("\n");
-        fflush(stdout);
-    #endif
-    
-    va_end(args);
-}
 
 static void update_fps(struct timeval *last_time, float *fps) {
     struct timeval now;
@@ -142,6 +125,19 @@ bool obstacle_detection_init(void) {
     if (pthread_mutex_init(&front_camera_data.frame_mutex, NULL) != 0 ||
         pthread_mutex_init(&bottom_camera_data.frame_mutex, NULL) != 0) {
         debug_print("Failed to initialize mutexes");
+        return false;
+    }
+
+    // Allocate RGB buffers
+    front_camera_data.rgb_buffer_size = get_rgb_buffer_size(FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT);
+    bottom_camera_data.rgb_buffer_size = get_rgb_buffer_size(BOTTOM_CAMERA_WIDTH, BOTTOM_CAMERA_HEIGHT);
+    
+    front_camera_data.rgb_buffer = malloc(front_camera_data.rgb_buffer_size);
+    bottom_camera_data.rgb_buffer = malloc(bottom_camera_data.rgb_buffer_size);
+    
+    if (!front_camera_data.rgb_buffer || !bottom_camera_data.rgb_buffer) {
+        debug_print("Failed to allocate RGB buffers");
+        cleanup_inference();
         return false;
     }
 
@@ -223,33 +219,40 @@ void obstacle_detection_periodic(void) {
                 front_camera_data.frames_received, front_camera_data.frames_processed);
         }
 
-        // Convert YUV422 to RGB
-        float* rgb = NULL;
-        if (!convert_uyvy_to_rgb_front(frame->buf, frame->w, frame->h, &rgb)) {
+        // Convert YUV422 to RGB using pre-allocated buffer
+        if (!convert_uyvy_to_rgb_front(frame->buf, frame->w, frame->h, 
+                                     front_camera_data.rgb_buffer,
+                                     front_camera_data.rgb_buffer_size)) {
             debug_print("Failed to convert YUV422 to RGB for front camera");
             return;
         }
 
         // Run inference for obstacle detection
         struct model_output_t model_output;
-        if (run_obstacle_inference(rgb, frame->w, frame->h, &model_output)) {
+        if (run_obstacle_inference(front_camera_data.rgb_buffer, frame->w, frame->h, &model_output)) {
             // Print inference results periodically
             if (front_camera_data.frames_processed % 10 == 0) {
-                debug_print("\nFront camera inference results:");
-                
                 char row_str[2 + (MODEL_OUTPUT_COL_SIZE * 7) + 2];
                 for (int i = 0; i < MODEL_OUTPUT_ROW_SIZE; i++) {
                     int offset = sprintf(row_str, "  ");
                     for (int j = 0; j < MODEL_OUTPUT_COL_SIZE; j++) {
                         offset += sprintf(row_str + offset, "%6.3f ", model_output.values[i][j]);
                     }
-                    sprintf(row_str + offset, "\n");
-                    debug_print(row_str);
+                    sprintf(row_str + offset, " ");
+                    debug_print("Front camera inference results: %s", row_str);
                 }
             }
         } else {
             debug_print("Front camera inference failed");
         }
+
+        // Send ABI message for obstacle detection
+        AbiSendMsgMODELDATA(ABI_BROADCAST, 
+            MODEL_TYPE_OBSTACLE,
+            MODEL_OUTPUT_ROW_SIZE,
+            MODEL_OUTPUT_COL_SIZE,
+            (float*)model_output.values  // Cast 2D array to 1D
+        );
 
         update_fps(&front_camera_data.last_frame_processed_time, 
             &front_camera_data.processed_fps);
@@ -260,15 +263,12 @@ void obstacle_detection_periodic(void) {
                 front_camera_data.received_fps, front_camera_data.processed_fps);
         }
 
-
         // Stream front camera frame if enabled
         if (obstacle_detection.stream_enabled) {
             if (!stream_frame(&front_camera_data.stream_ctx, frame)) {
                 debug_print("Failed to stream front camera frame");
             }
         }
-
-        free(rgb);
     }
 
     // Process bottom camera (border detection)
@@ -283,30 +283,31 @@ void obstacle_detection_periodic(void) {
             return;
         }
 
-        // Update processing statistics
-        bottom_camera_data.frames_processed++;
-        if (bottom_camera_data.frames_processed % 300 == 0) {
-            debug_print("Bottom camera frames received: %d, processed: %d", 
-                bottom_camera_data.frames_received, bottom_camera_data.frames_processed);
-        }
-
-        // Convert YUV422 to RGB for bottom camera
-        float* rgb = NULL;
-        if (!convert_uyvy_to_rgb_bottom(frame->buf, frame->w, frame->h, &rgb)) {
-            debug_print("Failed to convert bottom camera YUV422 to RGB");
+        // Convert YUV422 to RGB using pre-allocated buffer
+        if (!convert_uyvy_to_rgb_bottom(frame->buf, frame->w, frame->h,
+                                      bottom_camera_data.rgb_buffer,
+                                      bottom_camera_data.rgb_buffer_size)) {
+            debug_print("Failed to convert YUV422 to RGB for bottom camera");
             return;
         }
 
         // Run inference for border detection
         struct border_output_t border_output;
-        if (run_border_inference(rgb, frame->w, frame->h, &border_output)) {
-            // Print inference results periodically
+        if (run_border_inference(bottom_camera_data.rgb_buffer, frame->w, frame->h, &border_output)) {
             if (bottom_camera_data.frames_processed % 10 == 0) {
                 debug_print("Bottom camera inference results: %.3f", border_output.value);
             }
         } else {
             debug_print("Bottom camera inference failed");
         }
+
+        // Send ABI message for border detection
+        AbiSendMsgMODELDATA(ABI_BROADCAST,
+            MODEL_TYPE_BORDER,
+            1,  // rows
+            1,  // cols
+            &border_output.value
+        );
 
         update_fps(&bottom_camera_data.last_frame_processed_time, 
             &bottom_camera_data.processed_fps);
@@ -323,12 +324,15 @@ void obstacle_detection_periodic(void) {
                 debug_print("Failed to stream bottom camera frame");
             }
         }
-
-        free(rgb);
     }
 }
 
 void obstacle_detection_cleanup(void) {
+    // Free RGB buffers
+    free(front_camera_data.rgb_buffer);
+    free(bottom_camera_data.rgb_buffer);
+    front_camera_data.rgb_buffer = NULL;
+    bottom_camera_data.rgb_buffer = NULL;
     // Cleanup front camera resources
     if (front_camera_data.frame != NULL) {
         image_free(front_camera_data.frame);

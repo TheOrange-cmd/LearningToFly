@@ -680,26 +680,18 @@ static const float tensor_model_classifier_5_weight[1][32] =
 };
 static const float tensor_model_classifier_5_bias[1] = 
 {-0.14275500178337097168f};
-static const int64_t tensor__Constant_output_0[1] = 
-{1};
-static const int64_t tensor__Constant_1_output_0[1] = 
-{0};
-static const int64_t tensor__Constant_2_output_0[1] = 
-{3};
-static const int64_t tensor__Constant_3_output_0[1] = 
-{1};
 static const float tensor__model_classifier_classifier_2_Constant_output_0[1] = 
 {2.0000000000000000000f};
 static const float tensor__model_classifier_classifier_2_Constant_1_output_0[1] = 
 {9.9999997473787516356e-06f};
 union tensor_union_0 {
-float tensor__Slice_output_0[1][3][240][240];
-float tensor__model_conv1_Conv_output_0[1][4][60][60];
-float tensor__model_relu_Relu_output_0[1][4][60][60];
-float tensor__model_in2_InstanceNormalization_output_0[1][8][30][30];
-float tensor__model_conv3_Conv_output_0[1][8][15][15];
-float tensor__model_relu_2_Relu_output_0[1][8][15][15];
-float tensor__model_classifier_classifier_1_Gemm_output_0[1][32];
+float tensor__model_initial_pool_MaxPool_output_0[1][3][120][120];
+float tensor__model_in1_InstanceNormalization_output_0[1][4][60][60];
+float tensor__model_conv2_Conv_output_0[1][8][30][30];
+float tensor__model_relu_1_Relu_output_0[1][8][30][30];
+float tensor__model_in3_InstanceNormalization_output_0[1][8][15][15];
+float tensor__model_classifier_classifier_0_Flatten_output_0[1][1800];
+float tensor__model_classifier_classifier_2_ReduceMean_output_0[1][1];
 float tensor__model_classifier_classifier_2_Pow_output_0[1][32];
 float tensor__model_classifier_classifier_2_Add_output_0[1][1];
 float tensor__model_classifier_classifier_2_Div_output_0[1][32];
@@ -709,13 +701,12 @@ float tensor__model_classifier_classifier_5_Gemm_output_0[1][1];
 static union tensor_union_0 tu0;
 
 union tensor_union_1 {
-float tensor__model_initial_pool_MaxPool_output_0[1][3][120][120];
-float tensor__model_in1_InstanceNormalization_output_0[1][4][60][60];
-float tensor__model_conv2_Conv_output_0[1][8][30][30];
-float tensor__model_relu_1_Relu_output_0[1][8][30][30];
-float tensor__model_in3_InstanceNormalization_output_0[1][8][15][15];
-float tensor__model_classifier_classifier_0_Flatten_output_0[1][1800];
-float tensor__model_classifier_classifier_2_ReduceMean_output_0[1][1];
+float tensor__model_conv1_Conv_output_0[1][4][60][60];
+float tensor__model_relu_Relu_output_0[1][4][60][60];
+float tensor__model_in2_InstanceNormalization_output_0[1][8][30][30];
+float tensor__model_conv3_Conv_output_0[1][8][15][15];
+float tensor__model_relu_2_Relu_output_0[1][8][15][15];
+float tensor__model_classifier_classifier_1_Gemm_output_0[1][32];
 float tensor__model_classifier_classifier_2_ReduceMean_1_output_0[1][1];
 float tensor__model_classifier_classifier_2_Sqrt_output_0[1][1];
 float tensor__model_classifier_classifier_2_Mul_output_0[1][32];
@@ -728,67 +719,6 @@ float tensor__model_classifier_classifier_2_Sub_output_0[1][32];
 };
 static union tensor_union_2 tu2;
 
-
-/*
- * Operand:           Constant
- * Name in ONNX file: /Constant
- */
-FUNC_PREFIX void node__Constant( const int64_t output[1] )
-{
-	/* Constant */
-	/* The output is generated as a global tensor */
-	(void)output;
-}
-
-/*
- * Operand:           Constant
- * Name in ONNX file: /Constant_1
- */
-FUNC_PREFIX void node__Constant_1( const int64_t output[1] )
-{
-	/* Constant */
-	/* The output is generated as a global tensor */
-	(void)output;
-}
-
-/*
- * Operand:           Constant
- * Name in ONNX file: /Constant_2
- */
-FUNC_PREFIX void node__Constant_2( const int64_t output[1] )
-{
-	/* Constant */
-	/* The output is generated as a global tensor */
-	(void)output;
-}
-
-/*
- * Operand:           Constant
- * Name in ONNX file: /Constant_3
- */
-FUNC_PREFIX void node__Constant_3( const int64_t output[1] )
-{
-	/* Constant */
-	/* The output is generated as a global tensor */
-	(void)output;
-}
-
-/*
- * Operand:           Slice
- * Name in ONNX file: /Slice
- */
-FUNC_PREFIX void node__Slice( const float data[1][4][240][240], const int64_t starts[1], const int64_t ends[1], const int64_t axes[1], const int64_t steps[1], float output[1][3][240][240] )
-{
-	for (unsigned i0=0, o0=0; o0<1; i0+=1, o0++) {
-	for (unsigned i1=0, o1=0; o1<3; i1+=1, o1++) {
-	for (unsigned i2=0, o2=0; o2<240; i2+=1, o2++) {
-	for (unsigned i3=0, o3=0; o3<240; i3+=1, o3++) {
-		output[o0][o1][o2][o3] = data[i0][i1][i2][i3];
-	}
-	}
-	}
-	}
-}
 
 /*
  * Operand:           MaxPool
@@ -1456,26 +1386,21 @@ FUNC_PREFIX void node__model_classifier_classifier_6_Sigmoid( const float X[1][1
 }
 
 
-void entry(const float tensor_input[1][4][240][240], float tensor_output[1][1]){
-	node__Constant( tensor__Constant_output_0);
-	node__Constant_1( tensor__Constant_1_output_0);
-	node__Constant_2( tensor__Constant_2_output_0);
-	node__Constant_3( tensor__Constant_3_output_0);
-	node__Slice( tensor_input, tensor__Constant_1_output_0, tensor__Constant_2_output_0, tensor__Constant_output_0, tensor__Constant_3_output_0, tu0.tensor__Slice_output_0);
-	node__model_initial_pool_MaxPool( tu0.tensor__Slice_output_0, tu1.tensor__model_initial_pool_MaxPool_output_0);
-	node__model_conv1_Conv( tu1.tensor__model_initial_pool_MaxPool_output_0, tensor_model_conv1_weight, tensor_model_conv1_bias, tu0.tensor__model_conv1_Conv_output_0);
-	node__model_in1_InstanceNormalization( tu0.tensor__model_conv1_Conv_output_0, tensor_model_in1_weight, tensor_model_in1_bias, tu1.tensor__model_in1_InstanceNormalization_output_0);
-	node__model_relu_Relu( tu1.tensor__model_in1_InstanceNormalization_output_0, tu0.tensor__model_relu_Relu_output_0);
-	node__model_conv2_Conv( tu0.tensor__model_relu_Relu_output_0, tensor_model_conv2_weight, tensor_model_conv2_bias, tu1.tensor__model_conv2_Conv_output_0);
-	node__model_in2_InstanceNormalization( tu1.tensor__model_conv2_Conv_output_0, tensor_model_in2_weight, tensor_model_in2_bias, tu0.tensor__model_in2_InstanceNormalization_output_0);
-	node__model_relu_1_Relu( tu0.tensor__model_in2_InstanceNormalization_output_0, tu1.tensor__model_relu_1_Relu_output_0);
-	node__model_conv3_Conv( tu1.tensor__model_relu_1_Relu_output_0, tensor_model_conv3_weight, tensor_model_conv3_bias, tu0.tensor__model_conv3_Conv_output_0);
-	node__model_in3_InstanceNormalization( tu0.tensor__model_conv3_Conv_output_0, tensor_model_in3_weight, tensor_model_in3_bias, tu1.tensor__model_in3_InstanceNormalization_output_0);
-	node__model_relu_2_Relu( tu1.tensor__model_in3_InstanceNormalization_output_0, tu0.tensor__model_relu_2_Relu_output_0);
-	node__model_classifier_classifier_0_Flatten( tu0.tensor__model_relu_2_Relu_output_0, tu1.tensor__model_classifier_classifier_0_Flatten_output_0);
-	node__model_classifier_classifier_1_Gemm( tu1.tensor__model_classifier_classifier_0_Flatten_output_0, tensor_model_classifier_1_weight, tensor_model_classifier_1_bias, tu0.tensor__model_classifier_classifier_1_Gemm_output_0);
-	node__model_classifier_classifier_2_ReduceMean( tu0.tensor__model_classifier_classifier_1_Gemm_output_0, tu1.tensor__model_classifier_classifier_2_ReduceMean_output_0);
-	node__model_classifier_classifier_2_Sub( tu0.tensor__model_classifier_classifier_1_Gemm_output_0, tu1.tensor__model_classifier_classifier_2_ReduceMean_output_0, tu2.tensor__model_classifier_classifier_2_Sub_output_0);
+void entry(const float tensor_input[1][3][240][240], float tensor_output[1][1]){
+	node__model_initial_pool_MaxPool( tensor_input, tu0.tensor__model_initial_pool_MaxPool_output_0);
+	node__model_conv1_Conv( tu0.tensor__model_initial_pool_MaxPool_output_0, tensor_model_conv1_weight, tensor_model_conv1_bias, tu1.tensor__model_conv1_Conv_output_0);
+	node__model_in1_InstanceNormalization( tu1.tensor__model_conv1_Conv_output_0, tensor_model_in1_weight, tensor_model_in1_bias, tu0.tensor__model_in1_InstanceNormalization_output_0);
+	node__model_relu_Relu( tu0.tensor__model_in1_InstanceNormalization_output_0, tu1.tensor__model_relu_Relu_output_0);
+	node__model_conv2_Conv( tu1.tensor__model_relu_Relu_output_0, tensor_model_conv2_weight, tensor_model_conv2_bias, tu0.tensor__model_conv2_Conv_output_0);
+	node__model_in2_InstanceNormalization( tu0.tensor__model_conv2_Conv_output_0, tensor_model_in2_weight, tensor_model_in2_bias, tu1.tensor__model_in2_InstanceNormalization_output_0);
+	node__model_relu_1_Relu( tu1.tensor__model_in2_InstanceNormalization_output_0, tu0.tensor__model_relu_1_Relu_output_0);
+	node__model_conv3_Conv( tu0.tensor__model_relu_1_Relu_output_0, tensor_model_conv3_weight, tensor_model_conv3_bias, tu1.tensor__model_conv3_Conv_output_0);
+	node__model_in3_InstanceNormalization( tu1.tensor__model_conv3_Conv_output_0, tensor_model_in3_weight, tensor_model_in3_bias, tu0.tensor__model_in3_InstanceNormalization_output_0);
+	node__model_relu_2_Relu( tu0.tensor__model_in3_InstanceNormalization_output_0, tu1.tensor__model_relu_2_Relu_output_0);
+	node__model_classifier_classifier_0_Flatten( tu1.tensor__model_relu_2_Relu_output_0, tu0.tensor__model_classifier_classifier_0_Flatten_output_0);
+	node__model_classifier_classifier_1_Gemm( tu0.tensor__model_classifier_classifier_0_Flatten_output_0, tensor_model_classifier_1_weight, tensor_model_classifier_1_bias, tu1.tensor__model_classifier_classifier_1_Gemm_output_0);
+	node__model_classifier_classifier_2_ReduceMean( tu1.tensor__model_classifier_classifier_1_Gemm_output_0, tu0.tensor__model_classifier_classifier_2_ReduceMean_output_0);
+	node__model_classifier_classifier_2_Sub( tu1.tensor__model_classifier_classifier_1_Gemm_output_0, tu0.tensor__model_classifier_classifier_2_ReduceMean_output_0, tu2.tensor__model_classifier_classifier_2_Sub_output_0);
 	node__model_classifier_classifier_2_Constant( tensor__model_classifier_classifier_2_Constant_output_0);
 	node__model_classifier_classifier_2_Pow( tu2.tensor__model_classifier_classifier_2_Sub_output_0, tensor__model_classifier_classifier_2_Constant_output_0, tu0.tensor__model_classifier_classifier_2_Pow_output_0);
 	node__model_classifier_classifier_2_ReduceMean_1( tu0.tensor__model_classifier_classifier_2_Pow_output_0, tu1.tensor__model_classifier_classifier_2_ReduceMean_1_output_0);

@@ -3,21 +3,26 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h> 
+#include <math.h>    
 
 // Initialize the YUV to RGB conversion lookup tables
 bool init_yuv_conversion(void);
 
-// Separate conversion functions for front and bottom cameras
-bool convert_uyvy_to_rgb_front(const uint8_t* uyvy_data, int width, int height, float** rgb_output);
-bool convert_uyvy_to_rgb_bottom(const uint8_t* uyvy_data, int width, int height, float** rgb_output);
+// Get required buffer size for RGB conversion
+size_t get_rgb_buffer_size(int width, int height);
 
-// Convert UYVY format to RGB
-// Input: UYVY data, width, height
-// Output: RGB float array (allocated inside function)
-// Returns: true on success, false on failure
-// bool convert_uyvy_to_rgb(const uint8_t* uyvy_data, 
-//   int width, 
-//   int height, 
-//   float** rgb_output);
+// Convert functions that take pre-allocated buffer
+bool convert_uyvy_to_rgb_front(const uint8_t* uyvy_data, 
+    int width, 
+    int height, 
+    float* rgb_buffer,
+    size_t buffer_size);
+
+bool convert_uyvy_to_rgb_bottom(const uint8_t* uyvy_data, 
+    int width, 
+    int height, 
+    float* rgb_buffer,
+    size_t buffer_size);
 
 #endif // IMAGE_CONVERT_H

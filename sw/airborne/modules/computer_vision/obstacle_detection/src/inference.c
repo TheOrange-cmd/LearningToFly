@@ -6,6 +6,9 @@
 #include "model.h"
 #include "border_model_wrapper.h"
 
+#include "debug_print.h"
+DEFINE_DEBUG_PRINT("INFERENCE")
+
 // Get access to the tensor unions from the generated model
 extern union tensor_union_0 tu0;
 extern union tensor_union_1 tu1;
@@ -18,13 +21,13 @@ extern void entry_obstacle(const float
     float tensor_output[1][1][MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE]);
 
 extern void entry_border(const float 
-    tensor_input[1][4][240][240], 
+    tensor_input[1][3][240][240], 
     float tensor_output[1][1]);
     
 typedef float obstacle_input_tensor_t[MODEL_INPUT_BATCH][MODEL_INPUT_CHANNELS][MODEL_INPUT_HEIGHT][MODEL_INPUT_WIDTH];
 typedef float obstacle_output_tensor_t[1][1][MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE];
-typedef float border_input_tensor_t[1][4][240][240];
-typedef float border_output_tensor_t[1][1];
+typedef float border_input_tensor_t[1][3][240][240];  
+typedef float border_output_tensor_t[1][1];  
 
 static obstacle_input_tensor_t* obstacle_input = NULL;
 static obstacle_output_tensor_t* obstacle_output = NULL;
@@ -132,82 +135,49 @@ bool run_border_inference(const float* rgb_data,
     int width,
     int height,
     struct border_output_t* output) {
+    
     if (!border_input || !border_output || !rgb_data || !output) {
+        debug_print("Null pointer check failed!");
         return false;
     }
 
-    // Calculate input statistics before normalization
-    float sum = 0.0f;
-    float sum_sq = 0.0f;
-    float min_val = rgb_data[0];
-    float max_val = rgb_data[0];
-    
-    for(int i = 0; i < width * height * 3; i++) {
-        float val = rgb_data[i];
-        sum += val;
-        sum_sq += val * val;
-        if(val < min_val) min_val = val;
-        if(val > max_val) max_val = val;
-    }
-    
-    float mean_raw = sum / (width * height * 3);
-    float std_raw = sqrtf((sum_sq / (width * height * 3)) - (mean_raw * mean_raw));
+    const float* r_data = rgb_data;
+    const float* g_data = rgb_data + (width * height);
+    const float* b_data = rgb_data + (2 * width * height);
 
-    // printf("[Inference] Input stats - Mean: %.3f, Std: %.3f, Min: %.3f, Max: %.3f\n",
-    //        mean_raw, std_raw, min_val, max_val);
+    // ImageNet normalization parameters
+    const float means[3] = {0.485f, 0.456f, 0.406f};
+    const float stds[3] = {0.229f, 0.224f, 0.225f};
 
-    // Clear state
-    memset(border_input, 0, sizeof(*border_input));
-    memset(border_output, 0, sizeof(*border_output));
-    clear_border_tensors();
-    
-    // Process input
-    float* input_ptr = (float*)(*border_input);
-    const float mean[3] = {0.485f, 0.456f, 0.406f};
-    const float std[3] = {0.229f, 0.224f, 0.225f};
-    
-    for(int y = 0; y < height; y++) {
-        for(int x = 0; x < width; x++) {
-            for(int c = 0; c < 3; c++) {
-                int src_idx = (y * width + x) * 3 + c;
-                float val = rgb_data[src_idx] / 255.0f;
-                val = (val - mean[c]) / (std[c] + 1e-6f);
-                if(val < -3.0f) val = -3.0f;
-                if(val > 3.0f) val = 3.0f;
-                input_ptr[src_idx] = val;
-            }
+    // Process input data - convert from planar to NCHW format
+    for(int h = 0; h < height; h++) {
+        for(int w = 0; w < width; w++) {
+            int src_idx = h * width + w;
+            
+            // Convert to [0,1] and apply ImageNet normalization
+            float r = (r_data[src_idx] / 255.0f - means[0]) / stds[0];
+            float g = (g_data[src_idx] / 255.0f - means[1]) / stds[1];
+            float b = (b_data[src_idx] / 255.0f - means[2]) / stds[2];
+
+            (*border_input)[0][0][h][w] = r;
+            (*border_input)[0][1][h][w] = g;
+            (*border_input)[0][2][h][w] = b;
         }
     }
 
-    // Calculate normalized input statistics
-    sum = 0.0f;
-    sum_sq = 0.0f;
-    min_val = input_ptr[0];
-    max_val = input_ptr[0];
-    
-    for(int i = 0; i < width * height * 3; i++) {
-        float val = input_ptr[i];
-        sum += val;
-        sum_sq += val * val;
-        if(val < min_val) min_val = val;
-        if(val > max_val) max_val = val;
-    }
-    
-    float mean_norm = sum / (width * height * 3);
-    float std_norm = sqrtf((sum_sq / (width * height * 3)) - (mean_norm * mean_norm));
+    // Add debug prints for normalized values
+    printf("Normalized input check - First few values:\n");
+    printf("R: %.3f %.3f %.3f\n", (*border_input)[0][0][0][0], 
+           (*border_input)[0][0][0][1], (*border_input)[0][0][0][2]);
+    printf("G: %.3f %.3f %.3f\n", (*border_input)[0][1][0][0], 
+           (*border_input)[0][1][0][1], (*border_input)[0][1][0][2]);
+    printf("B: %.3f %.3f %.3f\n", (*border_input)[0][2][0][0], 
+           (*border_input)[0][2][0][1], (*border_input)[0][2][0][2]);
 
-    // printf("[Inference] Normalized stats - Mean: %.3f, Std: %.3f, Min: %.3f, Max: %.3f\n",
-    //        mean_norm, std_norm, min_val, max_val);
-
-    // Run inference
     entry_border(*border_input, *border_output);
 
-    // Process output
-    float raw_output = (*border_output)[0][0];
-    if(raw_output < -10.0f) raw_output = -10.0f;
-    if(raw_output > 10.0f) raw_output = 10.0f;
-    
-    output->value = 1.0f / (1.0f + expf(-raw_output));
+    output->value = (*border_output)[0][0];
+    debug_print("Model output (already sigmoided): %.6f", output->value);
 
     return true;
 }

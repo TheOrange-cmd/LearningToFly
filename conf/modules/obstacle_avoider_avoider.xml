@@ -1,0 +1,42 @@
+<!DOCTYPE module SYSTEM "module.dtd">
+
+<module name="obstacle_avoider_avoider" dir="computer_vision/obstacle_avoidance">
+  <doc>
+    <description>
+      Obstacle avoidance module using neural network-based detection of obstacles and floor
+    </description>
+  </doc>
+  <settings>
+    <dl_settings>
+        <dl_settings name="obstacle_avoider">
+            <!-- Speed settings -->
+            <dl_setting var="oag_max_speed" min="0" step="0.1" max="2.0" shortname="max_speed" module="obstacle_avoider_avoider" param="OAG_MAX_SPEED"/>
+            <dl_setting var="oag_min_speed" min="0.0" step="0.1" max="1.0" shortname="min_speed" module="obstacle_avoider_avoider"/>
+            <!-- Heading rate settings -->
+            <dl_setting var="oag_min_heading_rate" min="0" step="5" max="45" shortname="min_head_rate" module="obstacle_avoider_avoider"/>
+            <dl_setting var="oag_max_heading_rate" min="45" step="5" max="90" shortname="max_head_rate" module="obstacle_avoider_avoider"/>
+            <!-- Avoidance behavior weights -->
+            <dl_setting var="obstacle_weight" min="0.0" step="0.1" max="2.0" shortname="obs_weight" module="obstacle_avoider_avoider" param="OBSTACLE_WEIGHT"/>
+            <dl_setting var="floor_weight" min="0.0" step="0.1" max="2.0" shortname="floor_weight" module="obstacle_avoider_avoider" param="FLOOR_WEIGHT"/>
+            <!-- Thresholds -->
+            <dl_setting var="danger_threshold" min="0.0" step="0.1" max="1.0" shortname="danger_thresh" module="obstacle_avoider_avoider"/>
+            <!-- Filter settings -->
+            <dl_setting var="obstacle_filter_window" min="1" step="1" max="10" shortname="obs_filt"/>
+            <dl_setting var="boundary_filter_window" min="1" step="1" max="5" shortname="bound_filt"/>
+            <dl_setting var="oag_smoothing_factor" min="0.0" step="0.05" max="1.0" shortname="smooth"/>
+            <dl_setting var="oag_trend_weight" min="0.0" step="0.1" max="2.0" shortname="trend_w"/>
+        </dl_settings>
+    </dl_settings>
+  </settings>
+  
+  <header>
+    <file name="include/obstacle_avoider_avoider.h"/>
+  </header>
+  <init fun="obstacle_avoider_init()"/>
+  <periodic fun="obstacle_avoider_periodic()" freq="10"/>
+  <makefile target="ap|nps">
+    <file name="src/avoider.c"/>
+    <!-- Include paths -->
+    <flag name="CFLAGS" value="I$(PAPARAZZI_HOME)/sw/airborne/modules/computer_vision/obstacle_avoidance/include"/>
+  </makefile>
+</module>

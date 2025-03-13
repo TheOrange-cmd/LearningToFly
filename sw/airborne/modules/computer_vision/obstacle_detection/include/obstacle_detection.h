@@ -7,6 +7,15 @@
 #include "modules/computer_vision/lib/vision/image.h"
 #include "video_stream.h"  
 
+#define MODEL_TYPE_OBSTACLE 0
+#define MODEL_TYPE_BORDER 1
+
+// Camera dimensions
+#define FRONT_CAMERA_WIDTH 240
+#define FRONT_CAMERA_HEIGHT 520
+#define BOTTOM_CAMERA_WIDTH 240
+#define BOTTOM_CAMERA_HEIGHT 240
+
 // Configuration and state
 struct obstacle_detection_t {
     bool front_enabled;
@@ -26,6 +35,10 @@ struct camera_data_t {
     float processed_fps;
     struct stream_context_t stream_ctx;
     pthread_mutex_t frame_mutex;
+    
+    // Add RGB buffer members
+    float* rgb_buffer;
+    size_t rgb_buffer_size;
 };
 
 // External declarations

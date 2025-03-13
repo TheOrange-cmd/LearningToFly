@@ -3,10 +3,10 @@
 #define INFERENCE_H
 
 #include <stdbool.h>
-#include <stddef.h>  // for size_t
+#include <stddef.h>
 #include <stdint.h>
 #include "model.h"
-#include <math.h>  // for sqrtf and expf
+#include <math.h>
 
 // Structure to hold obstacle detection outputs
 struct model_output_t {
@@ -15,7 +15,7 @@ struct model_output_t {
 
 // Structure to hold border detection output
 struct border_output_t {
-    float value;  // Single output value for border detection
+    float value;  // Single output value (already sigmoided in the model)
 };
 
 // Initialize both inference systems

@@ -19,9 +19,9 @@ void print_tensor_debug_info(const float* input_tensor, const float* output_tens
     }
     printf("\n");
 
-    printf("First few values from tu0:\n");
+    printf("First few values from first layer output:\n");
     for(int i = 0; i < 5; i++) {
-        printf("%f ", tu0.tensor__Slice_output_0[0][0][0][i]);
+        printf("%f ", tu0.tensor__model_initial_pool_MaxPool_output_0[0][0][0][i]);
     }
     printf("\n");
 
