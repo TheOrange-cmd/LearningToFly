@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "debug_print.h"
+DEFINE_DEBUG_PRINT("IMG_CONVERT")
 
 #define FRONT_CAMERA_WIDTH 240
 #define FRONT_CAMERA_HEIGHT 520
@@ -101,36 +103,43 @@ bool init_yuv_conversion(void) {
 
     printf("[Convert] Initializing YUV conversion tables\n");
 
+    // BT.601 full range coefficients
+    const float kr = 0.299f;
+    const float kg = 0.587f;
+    const float kb = 0.114f;
+
     // Initialize conversion tables
     for (int y = 0; y < 256; y++) {
+        float yf = y / 255.0f;  // Normalize to [0,1]
         for (int u = 0; u < 256; u++) {
-            float uf = u - 128;
+            float uf = (u / 255.0f - 0.5f);  // Center at 0
             for (int v = 0; v < 256; v++) {
-                float vf = v - 128;
+                float vf = (v / 255.0f - 0.5f);  // Center at 0
                 
-                // Standard YUV to RGB conversion
-                float r = (y + 1.402f * vf);
-                float g = (y - 0.344f * uf - 0.714f * vf);
-                float b = (y + 1.772f * uf);
-
-                // Clamp to 0-255 and scale to MODEL_INPUT_MAX
-                yuv_to_r[y][v] = r < 0 ? 0 : (r > 255 ? MODEL_INPUT_MAX : (r / 255.0f) * MODEL_INPUT_MAX);
-                yuv_to_g[y][u][v] = g < 0 ? 0 : (g > 255 ? MODEL_INPUT_MAX : (g / 255.0f) * MODEL_INPUT_MAX);
-                yuv_to_b[y][u] = b < 0 ? 0 : (b > 255 ? MODEL_INPUT_MAX : (b / 255.0f) * MODEL_INPUT_MAX);
+                // BT.601 full range conversion
+                float r = yf + (2.0f * (1.0f - kr)) * vf;
+                float g = yf - (2.0f * (1.0f - kb) * kb/kg) * uf - (2.0f * (1.0f - kr) * kr/kg) * vf;
+                float b = yf + (2.0f * (1.0f - kb)) * uf;
+    
+                // Clamp to [0,1]
+                yuv_to_r[y][v] = r < 0 ? 0 : (r > 1 ? 1 : r);
+                yuv_to_g[y][u][v] = g < 0 ? 0 : (g > 1 ? 1 : g);
+                yuv_to_b[y][u] = b < 0 ? 0 : (b > 1 ? 1 : b);
             }
         }
     }
+    
 
     // Debug check some values
-    printf("[Convert] Sample YUV->RGB conversions:\n");
-    printf("Y=128, U=128, V=128 -> R=%.2f G=%.2f B=%.2f\n",
-        yuv_to_r[128][128],
-        yuv_to_g[128][128][128],
-        yuv_to_b[128][128]);
-    printf("Y=255, U=128, V=128 -> R=%.2f G=%.2f B=%.2f\n",
-        yuv_to_r[255][128],
-        yuv_to_g[255][128][128],
-        yuv_to_b[255][128]);
+    // printf("[Convert] Sample YUV->RGB conversions:\n");
+    // printf("Y=128, U=128, V=128 -> R=%.2f G=%.2f B=%.2f\n",
+    //     yuv_to_r[128][128],
+    //     yuv_to_g[128][128][128],
+    //     yuv_to_b[128][128]);
+    // printf("Y=255, U=128, V=128 -> R=%.2f G=%.2f B=%.2f\n",
+    //     yuv_to_r[255][128],
+    //     yuv_to_g[255][128][128],
+    //     yuv_to_b[255][128]);
 
     tables_initialized = true;
     return true;
@@ -157,11 +166,11 @@ static bool convert_uyvy_to_rgb_common(const uint8_t* uyvy_data,
     frame_counter++;
     
     // Debug first few bytes of input data
-    printf("[Convert] First 16 bytes of UYVY data: ");
-    for(int i = 0; i < 16; i++) {
-        printf("%d ", uyvy_data[i]);
-    }
-    printf("\n");
+    // printf("[Convert] First 16 bytes of UYVY data: ");
+    // for(int i = 0; i < 16; i++) {
+    //     printf("%d ", uyvy_data[i]);
+    // }
+    // printf("\n");
 
     float* r_channel = rgb_buffer;
     float* g_channel = rgb_buffer + (height * width);
@@ -187,30 +196,30 @@ static bool convert_uyvy_to_rgb_common(const uint8_t* uyvy_data,
     }
 
     // Debug output
-    printf("[Convert] First few RGB values:\n");
-    for(int i = 0; i < 4; i++) {
-        printf("Pixel %d: R=%.2f G=%.2f B=%.2f\n",
-            i,
-            r_channel[i],
-            g_channel[i],
-            b_channel[i]
-        );
-    }
+    // printf("[Convert] First few RGB values:\n");
+    // for(int i = 0; i < 4; i++) {
+    //     printf("Pixel %d: R=%.2f G=%.2f B=%.2f\n",
+    //         i,
+    //         r_channel[i],
+    //         g_channel[i],
+    //         b_channel[i]
+    //     );
+    // }
 
-    // Calculate and print channel ranges
-    float r_min = r_channel[0], r_max = r_channel[0];
-    float g_min = g_channel[0], g_max = g_channel[0];
-    float b_min = b_channel[0], b_max = b_channel[0];
-    for(int i = 0; i < width * height; i++) {
-        r_min = fminf(r_min, r_channel[i]);
-        r_max = fmaxf(r_max, r_channel[i]);
-        g_min = fminf(g_min, g_channel[i]);
-        g_max = fmaxf(g_max, g_channel[i]);
-        b_min = fminf(b_min, b_channel[i]);
-        b_max = fmaxf(b_max, b_channel[i]);
-    }
-    printf("[Convert] Channel ranges - R: %.2f to %.2f, G: %.2f to %.2f, B: %.2f to %.2f\n",
-        r_min, r_max, g_min, g_max, b_min, b_max);
+    // // Calculate and print channel ranges
+    // float r_min = r_channel[0], r_max = r_channel[0];
+    // float g_min = g_channel[0], g_max = g_channel[0];
+    // float b_min = b_channel[0], b_max = b_channel[0];
+    // for(int i = 0; i < width * height; i++) {
+    //     r_min = fminf(r_min, r_channel[i]);
+    //     r_max = fmaxf(r_max, r_channel[i]);
+    //     g_min = fminf(g_min, g_channel[i]);
+    //     g_max = fmaxf(g_max, g_channel[i]);
+    //     b_min = fminf(b_min, b_channel[i]);
+    //     b_max = fmaxf(b_max, b_channel[i]);
+    // }
+    // printf("[Convert] Channel ranges - R: %.2f to %.2f, G: %.2f to %.2f, B: %.2f to %.2f\n",
+    //     r_min, r_max, g_min, g_max, b_min, b_max);
 
     return true;
 }
@@ -226,7 +235,7 @@ bool convert_uyvy_to_rgb_front(const uint8_t* uyvy_data,
             width, height, FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT);
         return false;
     }
-
+    // printf("[Convert] Converting front camera frame to RGB\n");
     return convert_uyvy_to_rgb_common(uyvy_data, width, height, rgb_buffer, buffer_size);
 }
 
@@ -237,8 +246,19 @@ bool convert_uyvy_to_rgb_bottom(const uint8_t* uyvy_data,
     size_t buffer_size) {
     
     if (width != BOTTOM_CAMERA_WIDTH || height != BOTTOM_CAMERA_HEIGHT) {
-        printf("[Convert] Invalid bottom camera dimensions: %dx%d (expected %dx%d)\n",
+        debug_print("Invalid dimensions: got %dx%d, expected %dx%d",
             width, height, BOTTOM_CAMERA_WIDTH, BOTTOM_CAMERA_HEIGHT);
+        return false;
+    }
+
+    size_t required_size = (size_t)width * height * 3 * sizeof(float);
+    if (buffer_size != required_size) {
+        debug_print("Invalid buffer size: got %zu, need %zu", buffer_size, required_size);
+        return false;
+    }
+
+    if (!uyvy_data || !rgb_buffer) {
+        debug_print("Null pointers provided");
         return false;
     }
 

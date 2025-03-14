@@ -116,7 +116,25 @@ bool run_obstacle_inference(const float* rgb_data,
         return false;
     }
 
-    memcpy(*obstacle_input, rgb_data, sizeof(obstacle_input_tensor_t));
+    // Get pointers to the RGB channels
+    const float* r_data = rgb_data;
+    const float* g_data = rgb_data + (width * height);
+    const float* b_data = rgb_data + (2 * width * height);
+
+    // Scale to [0,255] range and copy to input tensor
+    // Assuming input tensor format is [batch][channel][height][width]
+    for(int h = 0; h < height; h++) {
+        for(int w = 0; w < width; w++) {
+            int src_idx = h * width + w;
+            // Red channel
+            (*obstacle_input)[0][0][h][w] = r_data[src_idx] * 255.0f;
+            // Green channel
+            (*obstacle_input)[0][1][h][w] = g_data[src_idx] * 255.0f;
+            // Blue channel
+            (*obstacle_input)[0][2][h][w] = b_data[src_idx] * 255.0f;
+        }
+    }
+
     memset(obstacle_output, 0, sizeof(obstacle_output_tensor_t));
 
     entry_obstacle(*obstacle_input, *obstacle_output);
@@ -145,39 +163,73 @@ bool run_border_inference(const float* rgb_data,
     const float* g_data = rgb_data + (width * height);
     const float* b_data = rgb_data + (2 * width * height);
 
-    // ImageNet normalization parameters
-    const float means[3] = {0.485f, 0.456f, 0.406f};
-    const float stds[3] = {0.229f, 0.224f, 0.225f};
+    // debug_print("Raw RGB range - R: [%.3f, %.3f], G: [%.3f, %.3f], B: [%.3f, %.3f]",
+    //     r_data[0], r_data[width*height-1],
+    //     g_data[0], g_data[width*height-1],
+    //     b_data[0], b_data[width*height-1]);
 
-    // Process input data - convert from planar to NCHW format
+    // ImageNet normalization parameters
+    const float means[3] = {0.485f * 255.0f, 0.456f * 255.0f, 0.406f * 255.0f};
+    const float stds[3] = {0.229f * 255.0f, 0.224f * 255.0f, 0.225f * 255.0f};
+    
+    // Process input data
     for(int h = 0; h < height; h++) {
         for(int w = 0; w < width; w++) {
             int src_idx = h * width + w;
             
-            // Convert to [0,1] and apply ImageNet normalization
-            float r = (r_data[src_idx] / 255.0f - means[0]) / stds[0];
-            float g = (g_data[src_idx] / 255.0f - means[1]) / stds[1];
-            float b = (b_data[src_idx] / 255.0f - means[2]) / stds[2];
-
+            // Scale to [0,255] range
+            float r = r_data[src_idx] * 255.0f;
+            float g = g_data[src_idx] * 255.0f;
+            float b = b_data[src_idx] * 255.0f;
+    
+            // Apply ImageNet normalization
+            r = (r - means[0]) / stds[0];
+            g = (g - means[1]) / stds[1];
+            b = (b - means[2]) / stds[2];
+    
             (*border_input)[0][0][h][w] = r;
             (*border_input)[0][1][h][w] = g;
             (*border_input)[0][2][h][w] = b;
         }
     }
 
-    // Add debug prints for normalized values
-    printf("Normalized input check - First few values:\n");
-    printf("R: %.3f %.3f %.3f\n", (*border_input)[0][0][0][0], 
-           (*border_input)[0][0][0][1], (*border_input)[0][0][0][2]);
-    printf("G: %.3f %.3f %.3f\n", (*border_input)[0][1][0][0], 
-           (*border_input)[0][1][0][1], (*border_input)[0][1][0][2]);
-    printf("B: %.3f %.3f %.3f\n", (*border_input)[0][2][0][0], 
-           (*border_input)[0][2][0][1], (*border_input)[0][2][0][2]);
+    // debug_print("First few normalized values - R: %.3f, G: %.3f, B: %.3f", 
+    //     (*border_input)[0][0][0][0], 
+    //     (*border_input)[0][1][0][0], 
+    //     (*border_input)[0][2][0][0]);
+    
+
+    // Debug prints
+    // printf("Raw input values (first few):\n");
+    // printf("R: %.3f %.3f %.3f\n", r_data[0], r_data[1], r_data[2]);
+    // printf("G: %.3f %.3f %.3f\n", g_data[0], g_data[1], g_data[2]);
+    // printf("B: %.3f %.3f %.3f\n", b_data[0], b_data[1], b_data[2]);
+
+    // printf("Normalized values (first few):\n");
+    // printf("R: %.3f %.3f %.3f\n", (*border_input)[0][0][0][0], 
+    //        (*border_input)[0][0][0][1], (*border_input)[0][0][0][2]);
+    // printf("G: %.3f %.3f %.3f\n", (*border_input)[0][1][0][0], 
+    //        (*border_input)[0][1][0][1], (*border_input)[0][1][0][2]);
+    // printf("B: %.3f %.3f %.3f\n", (*border_input)[0][2][0][0], 
+    //        (*border_input)[0][2][0][1], (*border_input)[0][2][0][2]);
 
     entry_border(*border_input, *border_output);
 
-    output->value = (*border_output)[0][0];
-    debug_print("Model output (already sigmoided): %.6f", output->value);
+    float model_output = (*border_output)[0][0];
+    if (isnan(model_output)) {
+        debug_print("WARNING: Model output is NaN");
+        model_output = 0.0f;
+    } else if (model_output > 1.0f) {
+        debug_print("WARNING: Model output > 1.0: %.3f", model_output);
+        model_output = 1.0f;
+    } else if (model_output < 0.0f) {
+        debug_print("WARNING: Model output < 0.0: %.3f", model_output);
+        model_output = 0.0f;
+    }
+    output->value = model_output;
+    // debug_print("Model output (inside function): %.6f", output->value);
+    // debug_print("Output pointer address: %p", (void*)output);
+    // debug_print("Output value address: %p", (void*)&(output->value));
 
     return true;
 }

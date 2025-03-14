@@ -175,16 +175,16 @@ float calculate_steering_command(float *speed_sp, float *heading_rate_sp) {
         *speed_sp = MAX(*speed_sp, oag_min_speed);
     }
 
-    // debug_print("Boundary:%.2f Obstacles:%.2f %.2f %.2f %.2f %.2f Dir:%.2f Spd:%.2f Rate:%.2f", 
-    //             boundary_danger,
-    //             regions[0].danger_level, 
-    //             regions[1].danger_level,
-    //             regions[2].danger_level,
-    //             regions[3].danger_level,
-    //             regions[4].danger_level,
-    //             steering_direction,
-    //             *speed_sp, 
-    //             *heading_rate_sp);
+    debug_print("Boundary:%.2f Obstacles:%.2f %.2f %.2f %.2f %.2f Dir:%.2f Spd:%.2f Rate:%.2f", 
+                boundary_danger,
+                regions[0].danger_level, 
+                regions[1].danger_level,
+                regions[2].danger_level,
+                regions[3].danger_level,
+                regions[4].danger_level,
+                steering_direction,
+                *speed_sp, 
+                *heading_rate_sp);
 
     return max_danger;
 }
@@ -234,7 +234,9 @@ void modeldata_handler(uint8_t sender_id, uint8_t output_type, uint8_t rows, uin
         }
     }
     else if (output_type == MODEL_TYPE_BORDER) {
-        latest_floor_value = values[0] * floor_weight;  // Apply weight immediately
+        debug_print("Raw border value received: %.6f", values[0]);
+        latest_floor_value = values[0] * floor_weight;
+        debug_print("Weighted border value: %.6f", latest_floor_value);
     }
     
     // Update counters
@@ -271,6 +273,7 @@ void obstacle_avoider_init(void) {
 void start_avoider(void) {
     avoider_enabled = true;
     guidance_h_mode_changed(GUIDANCE_H_MODE_GUIDED);
+    debug_print("Avoider enabled - start flying!");
 }
 
 void obstacle_avoider_cleanup(void) {

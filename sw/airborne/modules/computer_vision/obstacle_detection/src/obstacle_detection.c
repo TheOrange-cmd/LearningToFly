@@ -4,7 +4,11 @@
 #include <time.h>
 #include <stdbool.h>
 #include <pthread.h>
-#include <stdarg.h>
+#include <sys/types.h>  // For struct stat
+#include <sys/stat.h>   // For mkdir and struct stat
+#include <errno.h>      // For errno
+#include <string.h>     // For strerror
+#include <unistd.h>     // For getcwd
 
 #include "debug_print.h"
 DEFINE_DEBUG_PRINT("OBSDET")
@@ -98,24 +102,150 @@ struct image_t* front_camera_callback(struct image_t *img, uint8_t camera_id __a
 }
 
 struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camera_id __attribute__((unused))) {
-    pthread_mutex_lock(&bottom_camera_data.frame_mutex);
-    
-    update_fps(&bottom_camera_data.last_frame_received_time, 
-        &bottom_camera_data.received_fps);
-
-    if (bottom_camera_data.frame == NULL) {
-        bottom_camera_data.frame = malloc(sizeof(struct image_t));
-        image_create(bottom_camera_data.frame, img->w, img->h, img->type);
-    } else if (bottom_camera_data.frame->w != img->w || bottom_camera_data.frame->h != img->h) {
-        image_free(bottom_camera_data.frame);
-        image_create(bottom_camera_data.frame, img->w, img->h, img->type);
+    if (!img) {
+        debug_print("Received null image!");
+        return NULL;
     }
     
-    image_copy(img, bottom_camera_data.frame);
-    bottom_camera_data.frame_ready = true;
+    // Validate image dimensions
+    if (img->w <= 0 || img->h <= 0 || img->w > 10000 || img->h > 10000) {
+        debug_print("Invalid image dimensions: %dx%d", img->w, img->h);
+        return NULL;
+    }
+
+    // debug_print("Bottom camera frame: %dx%d, type=%d, buf_size=%d", 
+    //     (int)img->w, (int)img->h, (int)img->type, (int)img->buf_size);
+
+    pthread_mutex_lock(&bottom_camera_data.frame_mutex);
+    
+    // Allocate or reallocate frame buffer if needed
+    if (bottom_camera_data.frame == NULL) {
+        bottom_camera_data.frame = malloc(sizeof(struct image_t));
+        if (!bottom_camera_data.frame) {
+            debug_print("Failed to allocate frame struct");
+            pthread_mutex_unlock(&bottom_camera_data.frame_mutex);
+            return NULL;
+        }
+        memset(bottom_camera_data.frame, 0, sizeof(struct image_t));
+    }
+
+    // Create image with explicit size check
+    size_t required_size = (size_t)img->w * img->h * 2; // YUV422 format
+    if (bottom_camera_data.frame->buf_size != required_size) {
+        if (bottom_camera_data.frame->buf) {
+            image_free(bottom_camera_data.frame);
+        }
+        debug_print("Creating new frame buffer: %d bytes", (int)required_size);
+        
+        // Instead of checking the return value, just call image_create
+        image_create(bottom_camera_data.frame, img->w, img->h, img->type);
+        
+        // Then verify the buffer was created successfully
+        if (!bottom_camera_data.frame->buf || bottom_camera_data.frame->buf_size != required_size) {
+            debug_print("Failed to create frame buffer");
+            pthread_mutex_unlock(&bottom_camera_data.frame_mutex);
+            return NULL;
+        }
+    }
+    
+    // Copy with validation
+    if (img->buf && img->buf_size <= bottom_camera_data.frame->buf_size) {
+        memcpy(bottom_camera_data.frame->buf, img->buf, img->buf_size);
+        bottom_camera_data.frame->w = img->w;
+        bottom_camera_data.frame->h = img->h;
+        bottom_camera_data.frame->buf_size = img->buf_size;
+        bottom_camera_data.frame_ready = true;
+    } else {
+        debug_print("Invalid buffer sizes: src=%d, dst=%d", 
+            (int)img->buf_size, (int)bottom_camera_data.frame->buf_size);
+    }
     
     pthread_mutex_unlock(&bottom_camera_data.frame_mutex);
     return NULL;
+}
+
+static void ensure_directory_exists(const char* path) {
+    struct stat st;
+    if (stat(path, &st) == -1) {
+        debug_print("Directory %s does not exist, creating it", path);
+        if (mkdir(path, 0700) == -1) {
+            debug_print("Failed to create directory %s: %s", path, strerror(errno));
+        } else {
+            debug_print("Successfully created directory %s", path);
+        }
+    } else {
+        debug_print("Directory %s already exists", path);
+    }
+}
+
+static void save_yuv_image(const uint8_t* data, int width, int height, const char* filename) {
+    debug_print("Attempting to save YUV image to %s", filename);
+    
+    if (!data) {
+        debug_print("YUV data pointer is NULL");
+        return;
+    }
+
+    FILE* f = fopen(filename, "wb");
+    if (!f) {
+        debug_print("Failed to open file for writing: %s - Error: %s", filename, strerror(errno));
+        return;
+    }
+
+    size_t bytes_written = fwrite(data, 1, width * height * 2, f);
+    if (bytes_written != width * height * 2) {
+        debug_print("Failed to write all data. Wrote %zu of %d bytes", 
+            bytes_written, width * height * 2);
+    } else {
+        debug_print("Successfully wrote %zu bytes to %s", bytes_written, filename);
+    }
+
+    fclose(f);
+}
+
+static void save_rgb_image(const float* r_data, const float* g_data, const float* b_data, 
+                          int width, int height, const char* filename) {
+    debug_print("Attempting to save RGB image to %s", filename);
+    
+    if (!r_data || !g_data || !b_data) {
+        debug_print("One or more RGB data pointers is NULL");
+        return;
+    }
+
+    uint8_t* rgb = malloc(width * height * 3);
+    if (!rgb) {
+        debug_print("Failed to allocate RGB buffer for saving");
+        return;
+    }
+
+    // Convert float [0,1] to byte [0,255]
+    for (int i = 0; i < width * height; i++) {
+        rgb[i*3] = (uint8_t)(r_data[i] * 255.0f);
+        rgb[i*3+1] = (uint8_t)(g_data[i] * 255.0f);
+        rgb[i*3+2] = (uint8_t)(b_data[i] * 255.0f);
+    }
+
+    FILE* f = fopen(filename, "wb");
+    if (!f) {
+        debug_print("Failed to open file for writing: %s - Error: %s", filename, strerror(errno));
+        free(rgb);
+        return;
+    }
+
+    // Write PPM header
+    fprintf(f, "P6\n%d %d\n255\n", width, height);
+    
+    // Write image data
+    size_t bytes_written = fwrite(rgb, 1, width * height * 3, f);
+    if (bytes_written != width * height * 3) {
+        debug_print("Failed to write all data. Wrote %zu of %d bytes", 
+            bytes_written, width * height * 3);
+    } else {
+        debug_print("Successfully wrote %zu bytes to %s", bytes_written, filename);
+    }
+    
+    fclose(f);
+    free(rgb);
 }
 
 bool obstacle_detection_init(void) {
@@ -130,13 +260,21 @@ bool obstacle_detection_init(void) {
 
     // Allocate RGB buffers
     front_camera_data.rgb_buffer_size = get_rgb_buffer_size(FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT);
-    bottom_camera_data.rgb_buffer_size = get_rgb_buffer_size(BOTTOM_CAMERA_WIDTH, BOTTOM_CAMERA_HEIGHT);
+    size_t bottom_size = (size_t)BOTTOM_CAMERA_WIDTH * BOTTOM_CAMERA_HEIGHT * 3 * sizeof(float);
+    debug_print("Allocating bottom camera RGB buffer: %dx%d = %zu bytes", 
+        BOTTOM_CAMERA_WIDTH, BOTTOM_CAMERA_HEIGHT, bottom_size);
     
     front_camera_data.rgb_buffer = malloc(front_camera_data.rgb_buffer_size);
-    bottom_camera_data.rgb_buffer = malloc(bottom_camera_data.rgb_buffer_size);
+    bottom_camera_data.rgb_buffer_size = bottom_size;
+    bottom_camera_data.rgb_buffer = malloc(bottom_size);
+
+    if (!bottom_camera_data.rgb_buffer) {
+        debug_print("Failed to allocate bottom camera RGB buffer (%zu bytes)", bottom_size);
+        return false;
+    }
     
-    if (!front_camera_data.rgb_buffer || !bottom_camera_data.rgb_buffer) {
-        debug_print("Failed to allocate RGB buffers");
+    if (!front_camera_data.rgb_buffer) {
+        debug_print("Failed to allocate front camera RGB buffers");
         cleanup_inference();
         return false;
     }
@@ -239,7 +377,7 @@ void obstacle_detection_periodic(void) {
                         offset += sprintf(row_str + offset, "%6.3f ", model_output.values[i][j]);
                     }
                     sprintf(row_str + offset, " ");
-                    debug_print("Front camera inference results: %s", row_str);
+                    debug_print(row_str);
                 }
             }
         } else {
@@ -254,14 +392,14 @@ void obstacle_detection_periodic(void) {
             (float*)model_output.values  // Cast 2D array to 1D
         );
 
-        update_fps(&front_camera_data.last_frame_processed_time, 
-            &front_camera_data.processed_fps);
+        // update_fps(&front_camera_data.last_frame_processed_time, 
+        //     &front_camera_data.processed_fps);
   
-        // Print FPS periodically
-        if (front_camera_data.frames_processed % 300 == 0) {
-            debug_print("Front camera FPS - Received: %.2f, Processed: %.2f", 
-                front_camera_data.received_fps, front_camera_data.processed_fps);
-        }
+        // // Print FPS periodically
+        // if (front_camera_data.frames_processed % 300 == 0) {
+        //     debug_print("Front camera FPS - Received: %.2f, Processed: %.2f", 
+        //         front_camera_data.received_fps, front_camera_data.processed_fps);
+        // }
 
         // Stream front camera frame if enabled
         if (obstacle_detection.stream_enabled) {
@@ -273,54 +411,73 @@ void obstacle_detection_periodic(void) {
 
     // Process bottom camera (border detection)
     if (obstacle_detection.bottom_enabled) {
+        bottom_camera_data.frames_processed++;
         pthread_mutex_lock(&bottom_camera_data.frame_mutex);
         bool frame_ready = bottom_camera_data.frame_ready;
-        struct image_t* frame = bottom_camera_data.frame;
+        struct image_t* current_frame = bottom_camera_data.frame;  // Changed name to avoid shadowing
         bottom_camera_data.frame_ready = false;
         pthread_mutex_unlock(&bottom_camera_data.frame_mutex);
-
-        if (!frame_ready || !frame) {
+    
+        if (!frame_ready || !current_frame) {
             return;
         }
-
+    
         // Convert YUV422 to RGB using pre-allocated buffer
-        if (!convert_uyvy_to_rgb_bottom(frame->buf, frame->w, frame->h,
+        if (!convert_uyvy_to_rgb_bottom(current_frame->buf, current_frame->w, current_frame->h,
                                       bottom_camera_data.rgb_buffer,
                                       bottom_camera_data.rgb_buffer_size)) {
             debug_print("Failed to convert YUV422 to RGB for bottom camera");
             return;
         }
-
+    
         // Run inference for border detection
         struct border_output_t border_output;
-        if (run_border_inference(bottom_camera_data.rgb_buffer, frame->w, frame->h, &border_output)) {
-            if (bottom_camera_data.frames_processed % 10 == 0) {
+        if (run_border_inference(bottom_camera_data.rgb_buffer, current_frame->w, current_frame->h, &border_output)) {
+            if (bottom_camera_data.frames_processed % 30 == 0) {
                 debug_print("Bottom camera inference results: %.3f", border_output.value);
             }
         } else {
             debug_print("Bottom camera inference failed");
         }
-
-        // Send ABI message for border detection
-        AbiSendMsgMODELDATA(ABI_BROADCAST,
-            MODEL_TYPE_BORDER,
-            1,  // rows
-            1,  // cols
-            &border_output.value
-        );
-
-        update_fps(&bottom_camera_data.last_frame_processed_time, 
-            &bottom_camera_data.processed_fps);
-  
-        // Print FPS periodically
-        if (bottom_camera_data.frames_processed % 300 == 0) {
-            debug_print("Bottom camera FPS - Received: %.2f, Processed: %.2f", 
-                bottom_camera_data.received_fps, bottom_camera_data.processed_fps);
+    
+        AbiSendMsgFLOORDATA(ABI_BROADCAST, border_output.value);
+    
+        if (bottom_camera_data.frames_processed % 5 == 0) {  // Save every 30th frame
+            char cwd[512];
+            if (getcwd(cwd, sizeof(cwd)) == NULL) {
+                debug_print("Failed to get current working directory: %s", strerror(errno));
+                return;
+            }
+            // debug_print("Current working directory: %s", cwd);
+        
+            char debug_dir[768];
+            snprintf(debug_dir, sizeof(debug_dir), "%s/camera_debug", cwd);
+            ensure_directory_exists(debug_dir);
+        
+            // Get image dimensions from the frame
+            int width = current_frame->w;
+            int height = current_frame->h;
+            // debug_print("Image dimensions: %dx%d", width, height);
+        
+            char yuv_filename[1024];
+            snprintf(yuv_filename, sizeof(yuv_filename), 
+                "%s/frame_%d_yuv.raw", debug_dir, bottom_camera_data.frames_processed);
+            save_yuv_image(current_frame->buf, width, height, yuv_filename);
+        
+            char rgb_filename[1024];
+            snprintf(rgb_filename, sizeof(rgb_filename), 
+                "%s/frame_%d_rgb.ppm", debug_dir, bottom_camera_data.frames_processed);
+            save_rgb_image(bottom_camera_data.rgb_buffer,
+                bottom_camera_data.rgb_buffer + (width * height),
+                bottom_camera_data.rgb_buffer + (2 * width * height),
+                width, height, rgb_filename);
+        
+            // debug_print("Attempted to save frame %d", bottom_camera_data.frames_processed);
         }
-
+    
         // Stream bottom camera if enabled
         if (obstacle_detection.stream_enabled) {
-            if (!stream_frame(&bottom_camera_data.stream_ctx, frame)) {
+            if (!stream_frame(&bottom_camera_data.stream_ctx, current_frame)) {
                 debug_print("Failed to stream bottom camera frame");
             }
         }
