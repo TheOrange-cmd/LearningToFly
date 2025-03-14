@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import torch
 
 def convert_coordinates(bbox, width, height):
-    # Convert from x, y, w, h to x1, y1, x2, y2
     x1 = bbox["x"] - bbox["w"]/2 if bbox["x"] - bbox["w"]/2 > 0 else 0
     y1 = bbox["y"] - bbox["h"]/2 if bbox["y"] - bbox["h"]/2 > 0 else 0
     x2 = bbox["x"] + bbox["w"]/2 if bbox["x"] + bbox["w"]/2 < width else width
@@ -11,14 +10,15 @@ def convert_coordinates(bbox, width, height):
 
 def danger_level(x1, x2, y1, y2, label, width, height):
     x1_rel = x1 / width
-    y1_rel = y1 / height
     x2_rel = x2 / width
+    y1_rel = y1 / height
     y2_rel = y2 / height
-
+    
+    # Calculate side distance
     if x1_rel >= 0.8:
-        side_distance = (x1_rel - 0.6) * 2
+        side_distance = (x1_rel - 0.8)
     elif x1_rel >= 0.6:
-        side_distance = (x1_rel - 0.6) / 2
+        side_distance = (x1_rel - 0.6) / 4
     elif x2_rel <= 0.6:
         side_distance = (0.6 - x2_rel) / 2
     elif x2_rel <= 0.2:
@@ -29,41 +29,103 @@ def danger_level(x1, x2, y1, y2, label, width, height):
     if label == 0:
         width_distance = (x2_rel - x1_rel) / 0.25
         height_distance = min((y2_rel - y1_rel) / 0.8, 0.7)
-        if side_distance > 0.25:
-            multiplier = 2
-        else:
-            multiplier = 1
+        multiplier = 1.5 if side_distance > 0.25 else 1
         danger = min(max([width_distance, height_distance]) - side_distance * multiplier, 1)
     if label == 1:
         width_distance = (x2_rel - x1_rel) / 0.15
         height_distance = min((y2_rel - y1_rel) / 1.1, 0.7)
-        if side_distance > 0.25:
-            multiplier = 2
-        else:
-            multiplier = 1
+        multiplier = 1.5 if side_distance > 0.25 else 1
         danger = min(max([width_distance, height_distance]) - side_distance * multiplier, 1)
-    return danger
+    
+    return max(danger, 0)
 
-def cell_contains_bbox(bboxes, grid_lines, width, height, danger_levels):
-    box_inside_grid = [[[0 for _ in range(len(grid_lines[1])-1)] for _ in range(len(grid_lines[0])-1)] for _ in range(danger_levels)]
+class DangerLevelConfig:
+    def __init__(self):
+        # Levels must be in descending order of danger
+        self.LEVEL_DEFINITIONS = [
+            {'name': 'DANGER', 'level': 2, 'threshold': 0.7},
+            {'name': 'WARNING', 'level': 1, 'threshold': 0.6},
+            {'name': 'SAFE', 'level': 0, 'threshold': 0.0}
+        ]
+        
+        # Create convenience dictionaries
+        self.THRESHOLDS = {level['name']: level['threshold'] for level in self.LEVEL_DEFINITIONS}
+        self.LEVELS = {level['name']: level['level'] for level in self.LEVEL_DEFINITIONS}
+        
+    def get_level_for_value(self, value):
+        """Returns appropriate danger level for a given danger value."""
+        for level in self.LEVEL_DEFINITIONS:
+            if value >= level['threshold']:
+                return level['level']
+        return self.LEVELS['SAFE']  # Default to safe
+
+def cell_contains_bbox(bboxes, grid_lines, width, height):
+    """
+    Assigns danger levels to grid cells based on bounding boxes.
+    Empty cells are considered safe.
+    """
+    config = DangerLevelConfig()
+    num_columns = len(grid_lines[0]) - 1
+    num_rows = len(grid_lines[1]) - 1
+    num_levels = len(config.LEVELS)
+    
+    # Track maximum danger value for each cell
+    cell_max_danger = [[0 for _ in range(num_rows)] 
+                        for _ in range(num_columns)]
+    
+    def get_danger_level(danger_value):
+        if danger_value >= config.THRESHOLDS['DANGER']:
+            return config.LEVELS['DANGER']
+        elif danger_value >= config.THRESHOLDS['WARNING']:
+            return config.LEVELS['WARNING']
+        else:
+            return config.LEVELS['SAFE']
+    
+    def box_intersects_cell(x1, x2, left, right):
+        return ((left <= x1 <= right) or 
+                (left <= x2 <= right) or 
+                (x1 <= left and x2 >= right))
+    
+    def box_intersects_cell_y(y1, y2, bottom, top):
+        return ((bottom <= y1 <= top) or 
+                (bottom <= y2 <= top) or
+                (y1 <= bottom and y2 >= top))
+    
+    # First pass: calculate maximum danger value for each cell
     for bbox in bboxes:
         x1, x2, y1, y2 = convert_coordinates(bbox, width, height)
-        for i in range(len(grid_lines[0])-1):
-            left = grid_lines[0][i]
-            right = grid_lines[0][i+1]
-            if ((left <= x1 <= right) or (left <= x2 <= right)) or (x1 <= left and x2 >= right):
-                for j in range(len(grid_lines[1])-1):
-                    bottom = grid_lines[1][j]
-                    top = grid_lines[1][j+1]
-                    if (bottom <= y1 <= top) or (bottom <= y2 <= top):
+        
+        for i in range(num_columns):
+            left, right = grid_lines[0][i], grid_lines[0][i + 1]
+            
+            if box_intersects_cell(x1, x2, left, right):
+                for j in range(num_rows):
+                    bottom, top = grid_lines[1][j], grid_lines[1][j + 1]
+                    
+                    if box_intersects_cell_y(y1, y2, bottom, top):
                         danger = danger_level(x1, x2, y1, y2, bbox["label"], width, height)
-                        box_inside_grid[0][i][j] = 1 # Safe
-                        if danger >= 0.6:
-                            box_inside_grid[1][i][j] = 1 # Warning
-                        else:
-                            continue
-                        if 0.7 <= danger <= 1:
-                            box_inside_grid[2][i][j] = 1 # Danger
+                        cell_max_danger[i][j] = max(cell_max_danger[i][j], danger)
+    
+    # Initialize grid with all cells as safe
+    box_inside_grid = [[[0 for _ in range(num_rows)] 
+                         for _ in range(num_columns)] 
+                         for _ in range(num_levels)]
+    
+    # Set all cells in the SAFE level (index 0) to 1 by default
+    for i in range(num_columns):
+        for j in range(num_rows):
+            box_inside_grid[config.LEVELS['SAFE']][i][j] = 1
+    
+    # Second pass: override safe labels with higher danger levels where applicable
+    for i in range(num_columns):
+        for j in range(num_rows):
+            if cell_max_danger[i][j] > 0:
+                level = get_danger_level(cell_max_danger[i][j])
+                if level != config.LEVELS['SAFE']:
+                    # Clear the safe label and set the higher danger level
+                    box_inside_grid[config.LEVELS['SAFE']][i][j] = 0
+                    box_inside_grid[level][i][j] = 1
+
     return box_inside_grid
 
 def plot_image(sample_image, sample_danger, truth, grid_lines, grid=False, ax=None):

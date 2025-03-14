@@ -4,7 +4,7 @@
 #include <string.h>
 
 // Forward declaration of the entry function from onnx2c-generated code
-void entry(const float tensor_input[1][3][240][520], float tensor_output[1][3][5][1]);
+void entry(const float tensor_input[1][3][520][240], float tensor_output[1][3][5][1]);
 
 int main(int argc, char** argv) {
     // Check command line arguments
@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     }
     
     // Allocate memory for input and output tensors
-    float (*heap_input)[3][240][520] = malloc(sizeof(float[1][3][240][520]));
+    float (*heap_input)[3][520][240] = malloc(sizeof(float[1][3][520][240]));
     if (!heap_input) {
         printf("Error: Failed to allocate memory for input tensor\n");
         fclose(input_file);
@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
     }
     
     // Read input data
-    size_t input_elements = 1 * 3 * 240 * 520;
+    size_t input_elements = 1 * 3 * 520 * 240;
     size_t read_count = fread(heap_input, sizeof(float), input_elements, input_file);
     fclose(input_file);
     
@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     memset(heap_output, 0, sizeof(float[1][3][5][1]));
     
     // Run the model inference
-    entry(*heap_input, *heap_output);
+    entry(heap_input, heap_output);
     
     // Write output to file
     FILE* output_file = fopen(output_filename, "wb");

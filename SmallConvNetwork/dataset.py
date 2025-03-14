@@ -3,7 +3,7 @@ import glob
 import torch
 from torch.utils.data import Dataset
 from utils import *
-
+import numpy as np
 
 class CustomImageDataset(Dataset):
     def __init__(self, image_dir, width, height, grid_lines, danger_levels, device="cpu"):
@@ -35,4 +35,47 @@ class CustomImageDataset(Dataset):
             cell_contains_bbox(bboxes, self.grid_lines, self.width, self.height, self.danger_levels),
             device=self.device
         ).float()
+        return image, cell_danger_levels
+    
+
+
+
+class CustomImageDatasetUYVY(Dataset):
+    def __init__(self, image_dir, width, height, grid_lines, device="cpu"):
+        self.image_paths = sorted(glob.glob(image_dir + "/*.raw"))
+        self.label_paths = sorted(glob.glob(image_dir.replace("images", "labels") + "/*.txt"))
+        self.width = width
+        self.height = height
+        self.grid_lines = grid_lines
+        self.device = device
+        self.danger_config = DangerLevelConfig()
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def read_uyvy(self, path):
+        with open(path, 'rb') as f:
+            raw_data = np.frombuffer(f.read(), dtype=np.uint8).copy()  # Add .copy() here
+            return torch.from_numpy(raw_data.reshape(self.height, self.width*2))
+
+    def get_bboxes(self, path):
+        bboxes = open(path, "r").readlines()
+        bboxes = [{"label": int(bbox.split(" ")[0]),
+                   "x": int(float(bbox.split(" ")[1])*self.width),
+                   "y": int(float(bbox.split(" ")[2])*self.height),
+                   "w": int(float(bbox.split(" ")[3])*self.width),
+                   "h": int(float(bbox.split(" ")[4])*self.height)} for bbox in bboxes]
+        return bboxes
+
+    def __getitem__(self, idx):
+        image = self.read_uyvy(self.image_paths[idx]).to(self.device) / 255
+        bboxes = self.get_bboxes(self.label_paths[idx])
+        cell_danger_levels = torch.tensor(
+            cell_contains_bbox(bboxes, self.grid_lines, self.width, self.height),
+            device=self.device
+        ).float()
+        
+        # Debug print
+        # print(f"Dataset item shapes - Image: {image.shape}, Labels: {cell_danger_levels.shape}")
+        
         return image, cell_danger_levels

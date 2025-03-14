@@ -105,10 +105,12 @@
     </block>
     <block key="g" name="START" strip_button="Go" strip_icon="lookfore.png">
       <call_once fun="NavSetWaypointHere(WP_GOAL)"/>
+      <call_once fun="start_avoider()"/>
       <stay wp="GOAL"/>
     </block>
     <block name="STOP">
       <call_once fun="NavSetWaypointHere(WP_STDBY)"/>
+      <call_once fun="obstacle_avoider_cleanup()"/>
       <stay wp="STDBY"/>
     </block>
     <block name="RETREAT">
