@@ -19,6 +19,7 @@ DEFINE_DEBUG_PRINT("OBSDET")
 #include "modules/computer_vision/lib/encoding/rtp.h"
 #include "modules/computer_vision/lib/encoding/jpeg.h"
 #include "modules/core/abi.h"
+#include "lib/v4l/v4l2.h"
 
 // Project includes
 #include "video_stream.h"  // For streaming functionality
@@ -35,14 +36,6 @@ DEFINE_DEBUG_PRINT("OBSDET")
 #define DEBUG_TAG "OBSDET"
 #define MAX_LOG_LENGTH 256
 
-// Camera configuration
-#ifndef OBSTACLE_DETECTION_FRONT_CAMERA
-#define OBSTACLE_DETECTION_FRONT_CAMERA front_camera
-#endif
-
-#ifndef OBSTACLE_DETECTION_BOTTOM_CAMERA
-#define OBSTACLE_DETECTION_BOTTOM_CAMERA bottom_camera
-#endif
 
 #ifndef OBSTACLE_FRONT_RTP_PORT
 #define OBSTACLE_FRONT_RTP_PORT 5100
@@ -51,6 +44,7 @@ DEFINE_DEBUG_PRINT("OBSDET")
 #ifndef OBSTACLE_BOTTOM_RTP_PORT
 #define OBSTACLE_BOTTOM_RTP_PORT 5101
 #endif
+
 
 // static void debug_print(const char* format, ...);
 static struct image_t* front_camera_callback(struct image_t *img, uint8_t camera_id);
@@ -62,6 +56,11 @@ struct obstacle_detection_t obstacle_detection = {
     .bottom_enabled = true,
     .stream_enabled = false
 };
+
+static uint32_t front_frames_received = 0;
+static uint32_t front_frames_processed = 0;
+static uint32_t bottom_frames_received = 0;
+static uint32_t bottom_frames_processed = 0;
 
 struct camera_data_t front_camera_data = {0};
 struct camera_data_t bottom_camera_data = {0};
@@ -80,87 +79,201 @@ static void update_fps(struct timeval *last_time, float *fps) {
     *last_time = now;
 }
 
-struct image_t* front_camera_callback(struct image_t *img, uint8_t camera_id __attribute__((unused))) {
-    pthread_mutex_lock(&front_camera_data.frame_mutex);
-    
-    update_fps(&front_camera_data.last_frame_received_time, 
-        &front_camera_data.received_fps);
+// Queue implementation
+static bool queue_init(struct image_queue_t* q) {
+    q->front = 0;
+    q->rear = -1;
+    q->size = 0;
+    pthread_mutex_init(&q->mutex, NULL);
+    pthread_cond_init(&q->not_empty, NULL);
+    pthread_cond_init(&q->not_full, NULL);
+    return true;
+}
 
-    if (front_camera_data.frame == NULL) {
-        front_camera_data.frame = malloc(sizeof(struct image_t));
-        image_create(front_camera_data.frame, img->w, img->h, img->type);
-    } else if (front_camera_data.frame->w != img->w || front_camera_data.frame->h != img->h) {
-        image_free(front_camera_data.frame);
-        image_create(front_camera_data.frame, img->w, img->h, img->type);
+static bool queue_push(struct image_queue_t* q, struct image_t* img) {
+    pthread_mutex_lock(&q->mutex);
+    
+    // If queue is full, drop the oldest frame
+    if (q->size >= MAX_QUEUE_SIZE) {
+        // Free the oldest frame
+        struct image_t* old_img = q->images[q->front];
+        if (old_img) {
+            image_free(old_img);
+            free(old_img);
+        }
+        
+        // Move front pointer forward
+        q->front = (q->front + 1) % MAX_QUEUE_SIZE;
+        q->size--;
+        debug_print("Queue full - dropping oldest frame");
     }
     
-    image_copy(img, front_camera_data.frame);
-    front_camera_data.frame_ready = true;
+    // Add new frame
+    q->rear = (q->rear + 1) % MAX_QUEUE_SIZE;
+    q->images[q->rear] = img;
+    q->size++;
     
-    pthread_mutex_unlock(&front_camera_data.frame_mutex);
+    pthread_cond_signal(&q->not_empty);
+    pthread_mutex_unlock(&q->mutex);
+    return true;
+}
+
+static struct image_t* queue_pop(struct image_queue_t* q) {
+    pthread_mutex_lock(&q->mutex);
+    
+    while (q->size == 0) {
+        pthread_cond_wait(&q->not_empty, &q->mutex);
+    }
+    
+    struct image_t* img = q->images[q->front];
+    q->front = (q->front + 1) % MAX_QUEUE_SIZE;
+    q->size--;
+    
+    pthread_cond_signal(&q->not_full);
+    pthread_mutex_unlock(&q->mutex);
+    return img;
+}
+
+// Processing thread functions
+static void* front_processing_thread(void* arg) {
+    struct processing_thread_t* proc = (struct processing_thread_t*)arg;
+    
+    while (proc->running) {
+        struct image_t* img = queue_pop(&proc->queue);
+        if (img) {
+            struct timeval t1, t2, t3;
+            gettimeofday(&t1, NULL);
+            
+            bool conv_success = convert_uyvy_to_rgb_front(img->buf, img->w, img->h,
+                                front_camera_data.processing.rgb_buffer,
+                                front_camera_data.processing.rgb_buffer_size);
+            
+            gettimeofday(&t2, NULL);
+            
+            if (conv_success) {
+                struct model_output_t model_output;
+                bool inf_success = run_obstacle_inference(
+                    front_camera_data.processing.rgb_buffer,
+                    img->w, img->h, &model_output);
+                
+                gettimeofday(&t3, NULL);
+                
+                float conv_time = (t2.tv_sec - t1.tv_sec) * 1000.0f + 
+                                (t2.tv_usec - t1.tv_usec) / 1000.0f;
+                float inf_time = (t3.tv_sec - t2.tv_sec) * 1000.0f + 
+                                (t3.tv_usec - t2.tv_usec) / 1000.0f;
+                
+                debug_print("Front processing times - Convert: %.1fms, Inference: %.1fms",
+                          conv_time, inf_time);
+            }
+            
+            image_free(img);
+            free(img);
+        }
+    }
+    return NULL;
+}
+
+struct image_t* front_camera_callback(struct image_t *img, uint8_t camera_id __attribute__((unused))) {
+    static uint32_t callback_count = 0;
+    static struct timeval last_callback = {0, 0};
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    
+    callback_count++;
+    
+    if (last_callback.tv_sec != 0) {
+        float dt = (now.tv_sec - last_callback.tv_sec) * 1000.0f + 
+                   (now.tv_usec - last_callback.tv_usec) / 1000.0f;
+        debug_print("Front callback %d - Time since last: %.1fms", callback_count, dt);
+    }
+    last_callback = now;
+
+    // print shape of received image
+    debug_print("Received front image with shape: %dx%d", img->w, img->h);
+
+    if (obstacle_detection.front_enabled) {
+        struct image_t* proc_img = malloc(sizeof(struct image_t));
+        if (proc_img) {
+            image_create(proc_img, img->w, img->h, img->type);
+            image_copy(img, proc_img);
+            queue_push(&obstacle_detection.front_processor.queue, proc_img);
+        }
+    }
+    
     return NULL;
 }
 
 struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camera_id __attribute__((unused))) {
-    if (!img) {
-        debug_print("Received null image!");
-        return NULL;
-    }
+    static uint32_t callback_count = 0;
+    static struct timeval last_callback = {0, 0};
+    struct timeval now;
+    gettimeofday(&now, NULL);
     
-    // Validate image dimensions
-    if (img->w <= 0 || img->h <= 0 || img->w > 10000 || img->h > 10000) {
-        debug_print("Invalid image dimensions: %dx%d", img->w, img->h);
-        return NULL;
-    }
-
-    // debug_print("Bottom camera frame: %dx%d, type=%d, buf_size=%d", 
-    //     (int)img->w, (int)img->h, (int)img->type, (int)img->buf_size);
-
-    pthread_mutex_lock(&bottom_camera_data.frame_mutex);
+    callback_count++;
     
-    // Allocate or reallocate frame buffer if needed
-    if (bottom_camera_data.frame == NULL) {
-        bottom_camera_data.frame = malloc(sizeof(struct image_t));
-        if (!bottom_camera_data.frame) {
-            debug_print("Failed to allocate frame struct");
-            pthread_mutex_unlock(&bottom_camera_data.frame_mutex);
-            return NULL;
-        }
-        memset(bottom_camera_data.frame, 0, sizeof(struct image_t));
+    if (last_callback.tv_sec != 0) {
+        float dt = (now.tv_sec - last_callback.tv_sec) * 1000.0f + 
+                   (now.tv_usec - last_callback.tv_usec) / 1000.0f;
+        debug_print("Bottom callback %d - Time since last: %.1fms", callback_count, dt);
     }
+    last_callback = now;
 
-    // Create image with explicit size check
-    size_t required_size = (size_t)img->w * img->h * 2; // YUV422 format
-    if (bottom_camera_data.frame->buf_size != required_size) {
-        if (bottom_camera_data.frame->buf) {
-            image_free(bottom_camera_data.frame);
-        }
-        debug_print("Creating new frame buffer: %d bytes", (int)required_size);
-        
-        // Instead of checking the return value, just call image_create
-        image_create(bottom_camera_data.frame, img->w, img->h, img->type);
-        
-        // Then verify the buffer was created successfully
-        if (!bottom_camera_data.frame->buf || bottom_camera_data.frame->buf_size != required_size) {
-            debug_print("Failed to create frame buffer");
-            pthread_mutex_unlock(&bottom_camera_data.frame_mutex);
-            return NULL;
+    // print shape of received image
+    debug_print("Received bottom image with shape: %dx%d", img->w, img->h);
+
+    if (obstacle_detection.bottom_enabled) {
+        struct image_t* proc_img = malloc(sizeof(struct image_t));
+        if (proc_img) {
+            image_create(proc_img, img->w, img->h, img->type);
+            image_copy(img, proc_img);
+            queue_push(&obstacle_detection.bottom_processor.queue, proc_img);
         }
     }
     
-    // Copy with validation
-    if (img->buf && img->buf_size <= bottom_camera_data.frame->buf_size) {
-        memcpy(bottom_camera_data.frame->buf, img->buf, img->buf_size);
-        bottom_camera_data.frame->w = img->w;
-        bottom_camera_data.frame->h = img->h;
-        bottom_camera_data.frame->buf_size = img->buf_size;
-        bottom_camera_data.frame_ready = true;
-    } else {
-        debug_print("Invalid buffer sizes: src=%d, dst=%d", 
-            (int)img->buf_size, (int)bottom_camera_data.frame->buf_size);
-    }
+    return NULL;
+}
+
+static void* bottom_processing_thread(void* arg) {
+    struct processing_thread_t* proc = (struct processing_thread_t*)arg;
+    static uint32_t process_count = 0;
     
-    pthread_mutex_unlock(&bottom_camera_data.frame_mutex);
+    while (proc->running) {
+        struct image_t* img = queue_pop(&proc->queue);
+        if (img) {
+            process_count++;
+            debug_print("Bottom processing - Frame %d", process_count);
+            
+            struct timeval t1, t2, t3;
+            gettimeofday(&t1, NULL);
+            
+            bool conv_success = convert_uyvy_to_yuv_bottom(img->buf, img->w, img->h,
+                                bottom_camera_data.processing.rgb_buffer,
+                                bottom_camera_data.processing.rgb_buffer_size);
+            
+            gettimeofday(&t2, NULL);
+            
+            if (conv_success) {
+                struct border_output_t border_output;
+                bool inf_success = run_border_inference(
+                    bottom_camera_data.processing.rgb_buffer,
+                    120, 120, &border_output);
+                
+                gettimeofday(&t3, NULL);
+                
+                float conv_time = (t2.tv_sec - t1.tv_sec) * 1000.0f + 
+                                (t2.tv_usec - t1.tv_usec) / 1000.0f;
+                float inf_time = (t3.tv_sec - t2.tv_sec) * 1000.0f + 
+                                (t3.tv_usec - t2.tv_usec) / 1000.0f;
+                
+                debug_print("Bottom processing times - Convert: %.1fms, Inference: %.1fms",
+                          conv_time, inf_time);
+            }
+            
+            image_free(img);
+            free(img);
+        }
+    }
     return NULL;
 }
 
@@ -250,86 +363,102 @@ static void save_rgb_image(const float* r_data, const float* g_data, const float
 
 bool obstacle_detection_init(void) {
     debug_print("Init called");
+
+    // Initialize processing threads
+    obstacle_detection.front_processor.running = true;
+    queue_init(&obstacle_detection.front_processor.queue);
+    pthread_create(&obstacle_detection.front_processor.thread_id, NULL, 
+                  front_processing_thread, &obstacle_detection.front_processor);
+    
+    obstacle_detection.bottom_processor.running = true;
+    queue_init(&obstacle_detection.bottom_processor.queue);
+    pthread_create(&obstacle_detection.bottom_processor.thread_id, NULL, 
+                  bottom_processing_thread, &obstacle_detection.bottom_processor);
     
     // Initialize mutexes for both cameras
-    if (pthread_mutex_init(&front_camera_data.frame_mutex, NULL) != 0 ||
-        pthread_mutex_init(&bottom_camera_data.frame_mutex, NULL) != 0) {
+    if (pthread_mutex_init(&front_camera_data.processing.processing_mutex, NULL) != 0 ||
+        pthread_mutex_init(&front_camera_data.streaming.streaming_mutex, NULL) != 0 ||
+        pthread_mutex_init(&bottom_camera_data.processing.processing_mutex, NULL) != 0 ||
+        pthread_mutex_init(&bottom_camera_data.streaming.streaming_mutex, NULL) != 0) {
         debug_print("Failed to initialize mutexes");
         return false;
     }
 
     // Allocate RGB buffers
-    front_camera_data.rgb_buffer_size = get_rgb_buffer_size(FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT);
-    size_t bottom_size = (size_t)BOTTOM_CAMERA_WIDTH * BOTTOM_CAMERA_HEIGHT * 3 * sizeof(float);
+    front_camera_data.processing.rgb_buffer_size = (size_t)FRONT_CAMERA_WIDTH * FRONT_CAMERA_HEIGHT * 3 * sizeof(float);
+    size_t bottom_size = (size_t)120 * 120 * 3 * sizeof(float);
     debug_print("Allocating bottom camera RGB buffer: %dx%d = %zu bytes", 
-        BOTTOM_CAMERA_WIDTH, BOTTOM_CAMERA_HEIGHT, bottom_size);
+        120, 120, bottom_size);
     
-    front_camera_data.rgb_buffer = malloc(front_camera_data.rgb_buffer_size);
-    bottom_camera_data.rgb_buffer_size = bottom_size;
-    bottom_camera_data.rgb_buffer = malloc(bottom_size);
+    front_camera_data.processing.rgb_buffer = malloc(front_camera_data.processing.rgb_buffer_size);
+    bottom_camera_data.processing.rgb_buffer_size = bottom_size;
+    bottom_camera_data.processing.rgb_buffer = malloc(bottom_size);
 
-    if (!bottom_camera_data.rgb_buffer) {
+    if (!bottom_camera_data.processing.rgb_buffer) {
         debug_print("Failed to allocate bottom camera RGB buffer (%zu bytes)", bottom_size);
         return false;
     }
     
-    if (!front_camera_data.rgb_buffer) {
+    if (!front_camera_data.processing.rgb_buffer) {
         debug_print("Failed to allocate front camera RGB buffers");
         cleanup_inference();
         return false;
-    }
+    } 
 
-    // Register video callbacks for both cameras
-    front_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_FRONT_CAMERA, front_camera_callback, 10, 0);
-    bottom_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_BOTTOM_CAMERA, bottom_camera_callback, 10, 0);
+    front_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_FRONT_CAMERA, front_camera_callback, 0.5, 0);
+    bottom_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_BOTTOM_CAMERA, bottom_camera_callback, 1, 0);
+
     
     if (front_video_listener == NULL || bottom_video_listener == NULL) {
         debug_print("Failed to register video callbacks");
-        pthread_mutex_destroy(&front_camera_data.frame_mutex);
-        pthread_mutex_destroy(&bottom_camera_data.frame_mutex);
+        obstacle_detection_cleanup();
         return false;
+    }
+    else {
+        debug_print("Registered video callbacks");
     }
 
     // Initialize YUV to RGB conversion tables
     if (!init_yuv_conversion()) {
         debug_print("Failed to initialize YUV conversion tables");
-        pthread_mutex_destroy(&front_camera_data.frame_mutex);
-        pthread_mutex_destroy(&bottom_camera_data.frame_mutex);
+        obstacle_detection_cleanup();
         return false;
     }
 
-    // Initialize stream contexts for both cameras
-    memset(&front_camera_data.stream_ctx, 0, sizeof(struct stream_context_t));
-    memset(&bottom_camera_data.stream_ctx, 0, sizeof(struct stream_context_t));
-    
-    front_camera_data.stream_ctx.img_jpeg = (struct image_t){
-        .buf = NULL,
-        .buf_size = 0,
-        .w = 0,
-        .h = 0,
-        .type = IMAGE_JPEG
-    };
-    
-    bottom_camera_data.stream_ctx.img_jpeg = (struct image_t){
-        .buf = NULL,
-        .buf_size = 0,
-        .w = 0,
-        .h = 0,
-        .type = IMAGE_JPEG
-    };
+    if (obstacle_detection.stream_enabled) {
+        // Initialize stream contexts for both cameras
+        memset(&front_camera_data.streaming.stream_ctx, 0, sizeof(struct stream_context_t));
+        memset(&bottom_camera_data.streaming.stream_ctx, 0, sizeof(struct stream_context_t));
+        
+        front_camera_data.streaming.stream_ctx.img_jpeg = (struct image_t){
+            .buf = NULL,
+            .buf_size = 0,
+            .w = 0,
+            .h = 0,
+            .type = IMAGE_JPEG
+        };
+        
+        bottom_camera_data.streaming.stream_ctx.img_jpeg = (struct image_t){
+            .buf = NULL,
+            .buf_size = 0,
+            .w = 0,
+            .h = 0,
+            .type = IMAGE_JPEG
+        };
 
-    // Initialize streams for both cameras
-    if (!init_stream(&front_camera_data.stream_ctx, "127.0.0.1", OBSTACLE_FRONT_RTP_PORT) ||
-        !init_stream(&bottom_camera_data.stream_ctx, "127.0.0.1", OBSTACLE_BOTTOM_RTP_PORT)) {
-        debug_print("Failed to initialize video streams");
-        pthread_mutex_destroy(&front_camera_data.frame_mutex);
-        pthread_mutex_destroy(&bottom_camera_data.frame_mutex);
-        return false;
+        // Initialize streams for both cameras
+        if (!init_stream(&front_camera_data.streaming.stream_ctx, "127.0.0.1", OBSTACLE_FRONT_RTP_PORT) ||
+            !init_stream(&bottom_camera_data.streaming.stream_ctx, "127.0.0.1", OBSTACLE_BOTTOM_RTP_PORT)) {
+            debug_print("Failed to initialize video streams");
+            obstacle_detection_cleanup();
+            return false;
+        }
     }
 
     // Initialize inference system
     if (!init_inference()) {
         debug_print("Failed to initialize inference");
+        obstacle_detection_cleanup();
         return false;
     }
 
@@ -338,181 +467,71 @@ bool obstacle_detection_init(void) {
 }
 
 void obstacle_detection_periodic(void) {
-    // Process front camera (obstacle detection)
-    if (obstacle_detection.front_enabled) {
-        pthread_mutex_lock(&front_camera_data.frame_mutex);
-        bool frame_ready = front_camera_data.frame_ready;
-        struct image_t* frame = front_camera_data.frame;
-        front_camera_data.frame_ready = false;
-        pthread_mutex_unlock(&front_camera_data.frame_mutex);
+    if (obstacle_detection.stream_enabled) {
+        // Stream front camera
+        pthread_mutex_lock(&front_camera_data.streaming.streaming_mutex);
+        if (front_camera_data.streaming.frame_ready && front_camera_data.streaming.frame) {
+            stream_frame(&front_camera_data.streaming.stream_ctx, front_camera_data.streaming.frame);
+            front_camera_data.streaming.frame_ready = false;
+        }
+        pthread_mutex_unlock(&front_camera_data.streaming.streaming_mutex);
 
-        if (!frame_ready || !frame) {
-            return;
+        // Stream bottom camera
+        pthread_mutex_lock(&bottom_camera_data.streaming.streaming_mutex);
+        if (bottom_camera_data.streaming.frame_ready && bottom_camera_data.streaming.frame) {
+            stream_frame(&bottom_camera_data.streaming.stream_ctx, bottom_camera_data.streaming.frame);
+            bottom_camera_data.streaming.frame_ready = false;
         }
-
-        // Update processing statistics
-        front_camera_data.frames_processed++;
-        if (front_camera_data.frames_processed % 300 == 0) {
-            debug_print("Front camera frames received: %d, processed: %d", 
-                front_camera_data.frames_received, front_camera_data.frames_processed);
-        }
-
-        // Convert YUV422 to RGB using pre-allocated buffer
-        if (!convert_uyvy_to_rgb_front(frame->buf, frame->w, frame->h, 
-                                     front_camera_data.rgb_buffer,
-                                     front_camera_data.rgb_buffer_size)) {
-            debug_print("Failed to convert YUV422 to RGB for front camera");
-            return;
-        }
-
-        // Run inference for obstacle detection
-        struct model_output_t model_output;
-        if (run_obstacle_inference(front_camera_data.rgb_buffer, frame->w, frame->h, &model_output)) {
-            // Print inference results periodically
-            if (front_camera_data.frames_processed % 10 == 0) {
-                char row_str[2 + (MODEL_OUTPUT_COL_SIZE * 7) + 2];
-                for (int i = 0; i < MODEL_OUTPUT_ROW_SIZE; i++) {
-                    int offset = sprintf(row_str, "  ");
-                    for (int j = 0; j < MODEL_OUTPUT_COL_SIZE; j++) {
-                        offset += sprintf(row_str + offset, "%6.3f ", model_output.values[i][j]);
-                    }
-                    sprintf(row_str + offset, " ");
-                    debug_print(row_str);
-                }
-            }
-        } else {
-            debug_print("Front camera inference failed");
-        }
-
-        // Send ABI message for obstacle detection
-        AbiSendMsgMODELDATA(ABI_BROADCAST, 
-            MODEL_TYPE_OBSTACLE,
-            MODEL_OUTPUT_ROW_SIZE,
-            MODEL_OUTPUT_COL_SIZE,
-            (float*)model_output.values  // Cast 2D array to 1D
-        );
-
-        // update_fps(&front_camera_data.last_frame_processed_time, 
-        //     &front_camera_data.processed_fps);
-  
-        // // Print FPS periodically
-        // if (front_camera_data.frames_processed % 300 == 0) {
-        //     debug_print("Front camera FPS - Received: %.2f, Processed: %.2f", 
-        //         front_camera_data.received_fps, front_camera_data.processed_fps);
-        // }
-
-        // Stream front camera frame if enabled
-        if (obstacle_detection.stream_enabled) {
-            if (!stream_frame(&front_camera_data.stream_ctx, frame)) {
-                debug_print("Failed to stream front camera frame");
-            }
-        }
-    }
-
-    // Process bottom camera (border detection)
-    if (obstacle_detection.bottom_enabled) {
-        bottom_camera_data.frames_processed++;
-        pthread_mutex_lock(&bottom_camera_data.frame_mutex);
-        bool frame_ready = bottom_camera_data.frame_ready;
-        struct image_t* current_frame = bottom_camera_data.frame;  // Changed name to avoid shadowing
-        bottom_camera_data.frame_ready = false;
-        pthread_mutex_unlock(&bottom_camera_data.frame_mutex);
-    
-        if (!frame_ready || !current_frame) {
-            return;
-        }
-    
-        // Convert YUV422 to RGB using pre-allocated buffer
-        if (!convert_uyvy_to_rgb_bottom(current_frame->buf, current_frame->w, current_frame->h,
-                                      bottom_camera_data.rgb_buffer,
-                                      bottom_camera_data.rgb_buffer_size)) {
-            debug_print("Failed to convert YUV422 to RGB for bottom camera");
-            return;
-        }
-    
-        // Run inference for border detection
-        struct border_output_t border_output;
-        if (run_border_inference(bottom_camera_data.rgb_buffer, current_frame->w, current_frame->h, &border_output)) {
-            if (bottom_camera_data.frames_processed % 30 == 0) {
-                debug_print("Bottom camera inference results: %.3f", border_output.value);
-            }
-        } else {
-            debug_print("Bottom camera inference failed");
-        }
-    
-        AbiSendMsgFLOORDATA(ABI_BROADCAST, border_output.value);
-    
-        if (bottom_camera_data.frames_processed % 5 == 0) {  // Save every 30th frame
-            char cwd[512];
-            if (getcwd(cwd, sizeof(cwd)) == NULL) {
-                debug_print("Failed to get current working directory: %s", strerror(errno));
-                return;
-            }
-            // debug_print("Current working directory: %s", cwd);
-        
-            char debug_dir[768];
-            snprintf(debug_dir, sizeof(debug_dir), "%s/camera_debug", cwd);
-            ensure_directory_exists(debug_dir);
-        
-            // Get image dimensions from the frame
-            int width = current_frame->w;
-            int height = current_frame->h;
-            // debug_print("Image dimensions: %dx%d", width, height);
-        
-            char yuv_filename[1024];
-            snprintf(yuv_filename, sizeof(yuv_filename), 
-                "%s/frame_%d_yuv.raw", debug_dir, bottom_camera_data.frames_processed);
-            save_yuv_image(current_frame->buf, width, height, yuv_filename);
-        
-            char rgb_filename[1024];
-            snprintf(rgb_filename, sizeof(rgb_filename), 
-                "%s/frame_%d_rgb.ppm", debug_dir, bottom_camera_data.frames_processed);
-            save_rgb_image(bottom_camera_data.rgb_buffer,
-                bottom_camera_data.rgb_buffer + (width * height),
-                bottom_camera_data.rgb_buffer + (2 * width * height),
-                width, height, rgb_filename);
-        
-            // debug_print("Attempted to save frame %d", bottom_camera_data.frames_processed);
-        }
-    
-        // Stream bottom camera if enabled
-        if (obstacle_detection.stream_enabled) {
-            if (!stream_frame(&bottom_camera_data.stream_ctx, current_frame)) {
-                debug_print("Failed to stream bottom camera frame");
-            }
-        }
+        pthread_mutex_unlock(&bottom_camera_data.streaming.streaming_mutex);
     }
 }
 
 void obstacle_detection_cleanup(void) {
+    // Stop processing threads
+    obstacle_detection.front_processor.running = false;
+    obstacle_detection.bottom_processor.running = false;
+    
+    // Signal threads to wake up and exit
+    pthread_cond_signal(&obstacle_detection.front_processor.queue.not_empty);
+    pthread_cond_signal(&obstacle_detection.bottom_processor.queue.not_empty);
+    
+    // Wait for threads to finish
+    pthread_join(obstacle_detection.front_processor.thread_id, NULL);
+    pthread_join(obstacle_detection.bottom_processor.thread_id, NULL);
+
     // Free RGB buffers
-    free(front_camera_data.rgb_buffer);
-    free(bottom_camera_data.rgb_buffer);
-    front_camera_data.rgb_buffer = NULL;
-    bottom_camera_data.rgb_buffer = NULL;
+    free(front_camera_data.processing.rgb_buffer);
+    free(bottom_camera_data.processing.rgb_buffer);
+    front_camera_data.processing.rgb_buffer = NULL;
+    bottom_camera_data.processing.rgb_buffer = NULL;
+
     // Cleanup front camera resources
-    if (front_camera_data.frame != NULL) {
-        image_free(front_camera_data.frame);
-        free(front_camera_data.frame);
-        front_camera_data.frame = NULL;
+    if (front_camera_data.streaming.frame != NULL) {
+        image_free(front_camera_data.streaming.frame);
+        free(front_camera_data.streaming.frame);
+        front_camera_data.streaming.frame = NULL;
     }
-    if (front_camera_data.stream_ctx.img_jpeg.buf != NULL) {
-        image_free(&front_camera_data.stream_ctx.img_jpeg);
+    if (front_camera_data.streaming.stream_ctx.img_jpeg.buf != NULL) {
+        image_free(&front_camera_data.streaming.stream_ctx.img_jpeg);
     }
-    cleanup_stream(&front_camera_data.stream_ctx);
-    pthread_mutex_destroy(&front_camera_data.frame_mutex);
+    cleanup_stream(&front_camera_data.streaming.stream_ctx);
 
     // Cleanup bottom camera resources
-    if (bottom_camera_data.frame != NULL) {
-        image_free(bottom_camera_data.frame);
-        free(bottom_camera_data.frame);
-        bottom_camera_data.frame = NULL;
+    if (bottom_camera_data.streaming.frame != NULL) {
+        image_free(bottom_camera_data.streaming.frame);
+        free(bottom_camera_data.streaming.frame);
+        bottom_camera_data.streaming.frame = NULL;
     }
-    if (bottom_camera_data.stream_ctx.img_jpeg.buf != NULL) {
-        image_free(&bottom_camera_data.stream_ctx.img_jpeg);
+    if (bottom_camera_data.streaming.stream_ctx.img_jpeg.buf != NULL) {
+        image_free(&bottom_camera_data.streaming.stream_ctx.img_jpeg);
     }
-    cleanup_stream(&bottom_camera_data.stream_ctx);
-    pthread_mutex_destroy(&bottom_camera_data.frame_mutex);
+    cleanup_stream(&bottom_camera_data.streaming.stream_ctx);
+
+    // Destroy all mutexes
+    pthread_mutex_destroy(&front_camera_data.processing.processing_mutex);
+    pthread_mutex_destroy(&front_camera_data.streaming.streaming_mutex);
+    pthread_mutex_destroy(&bottom_camera_data.processing.processing_mutex);
+    pthread_mutex_destroy(&bottom_camera_data.streaming.streaming_mutex);
 
     // Cleanup inference system
     cleanup_inference();

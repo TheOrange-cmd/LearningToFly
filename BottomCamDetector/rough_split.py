@@ -1,3 +1,7 @@
+'''
+Script to perform rough split of images into floor and non-floor images to reduce manual labeling effort, see 
+'''
+
 import os
 import cv2
 import numpy as np
@@ -479,7 +483,6 @@ class FloorImageSeparator:
 
 
 if __name__ == "__main__":
-    # Replace with your image folder
     image_folder = "./merged"
 
     # Create separator

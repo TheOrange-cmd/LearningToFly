@@ -31,13 +31,18 @@
   </header>
 
   <init fun="obstacle_detection_init()"/>
-  <periodic fun="obstacle_detection_periodic()" freq="10"/>
+  <periodic fun="obstacle_detection_periodic()" freq="5"/>
 
   <makefile target="ap|nps">
     <!-- Setup Video Feed -->
     <define name="VIDEO_THREAD" value="1"/>
-    <define name="OBSTACLE_DETECTION_CAMERA" value="front_camera"/>
+    <define name="OBSTACLE_DETECTION_FRONT_CAMERA" value="front_camera"/>
     <define name="OBSTACLE_DETECTION_BOTTOM_CAMERA" value="bottom_camera"/>
+    <define name="FRONT_CAMERA_WIDTH" value="240"/>
+    <define name="FRONT_CAMERA_HEIGHT" value="520"/>
+    <define name="BOTTOM_CAMERA_WIDTH" value="240"/>
+    <define name="BOTTOM_CAMERA_HEIGHT" value="240"/>
+    
 
     <!-- Include the video streaming dependencies -->
     <file name="rtp.c" dir="modules/computer_vision/lib/encoding"/>
@@ -83,18 +88,9 @@
       <raw>
           $(TARGET).CFLAGS += -DUSE_VIDEO_THREAD
       </raw>
-      
-      <!-- Maybe add these to ensure proper camera initialization -->
-      <define name="MT9F002_INITIAL_OFFSET_X" value="2048"/>
-      <define name="MT9F002_INITIAL_OFFSET_Y" value="2048"/>
   </makefile>
 
   <makefile target="nps">
       <!-- Simulator specific configuration -->
-      <define name="VIDEO_CAPTURE_PATH_GAZEBO" value="front_camera"/>
-      <define name="USE_VIDEO_THREAD"/>
-      <!-- Maybe add these to prevent MT9V117 initialization -->
-      <define name="SIMULATE_MT9F002"/>
-      <define name="USE_GAZEBO_CAM"/>
   </makefile>
 </module>

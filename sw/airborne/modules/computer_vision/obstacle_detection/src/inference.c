@@ -21,12 +21,12 @@ extern void entry_obstacle(const float
     float tensor_output[1][1][MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE]);
 
 extern void entry_border(const float 
-    tensor_input[1][3][240][240], 
+    tensor_input[1][3][120][120], 
     float tensor_output[1][1]);
     
 typedef float obstacle_input_tensor_t[MODEL_INPUT_BATCH][MODEL_INPUT_CHANNELS][MODEL_INPUT_HEIGHT][MODEL_INPUT_WIDTH];
 typedef float obstacle_output_tensor_t[1][1][MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE];
-typedef float border_input_tensor_t[1][3][240][240];  
+typedef float border_input_tensor_t[1][3][120][120];  
 typedef float border_output_tensor_t[1][1];  
 
 static obstacle_input_tensor_t* obstacle_input = NULL;
@@ -34,55 +34,6 @@ static obstacle_output_tensor_t* obstacle_output = NULL;
 static border_input_tensor_t* border_input = NULL;
 static border_output_tensor_t* border_output = NULL;
 
-void clip_tensor_values(float* tensor, size_t size, float min_val, float max_val) {
-    for(size_t i = 0; i < size; i++) {
-        if(tensor[i] < min_val) tensor[i] = min_val;
-        if(tensor[i] > max_val) tensor[i] = max_val;
-    }
-}
-
-void normalize_input_tensor(float* tensor, int width, int height, int channels) {
-    // First pass - get mean and std
-    float sum = 0.0f;
-    float sq_sum = 0.0f;
-    int size = width * height * channels;
-    
-    for(int i = 0; i < size; i++) {
-        sum += tensor[i];
-        sq_sum += tensor[i] * tensor[i];
-    }
-    
-    float mean = sum / size;
-    float std = sqrtf(sq_sum/size - mean*mean);
-    
-    // Second pass - normalize
-    for(int i = 0; i < size; i++) {
-        tensor[i] = (tensor[i] - mean) / (std + 1e-5f);
-        // Clip to reasonable range
-        if(tensor[i] < -3.0f) tensor[i] = -3.0f;
-        if(tensor[i] > 3.0f) tensor[i] = 3.0f;
-    }
-}
-
-void normalize_intermediate_tensor(float* tensor, int size) {
-    float sum = 0.0f;
-    float sq_sum = 0.0f;
-    
-    for(int i = 0; i < size; i++) {
-        sum += tensor[i];
-        sq_sum += tensor[i] * tensor[i];
-    }
-    
-    float mean = sum / size;
-    float std = sqrtf(sq_sum/size - mean*mean);
-    
-    for(int i = 0; i < size; i++) {
-        tensor[i] = (tensor[i] - mean) / (std + 1e-5f);
-        // Clip to reasonable range
-        if(tensor[i] < -3.0f) tensor[i] = -3.0f;
-        if(tensor[i] > 3.0f) tensor[i] = 3.0f;
-    }
-}
 
 bool init_inference(void) {
     // Allocate tensors for obstacle detection

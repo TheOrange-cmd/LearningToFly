@@ -173,6 +173,17 @@ bool v4l2_init_subdev(char *subdev_name, uint8_t pad, uint16_t code, struct img_
   return true;
 }
 
+void print_v4l2_format(struct v4l2_format *fmt) {
+  printf("[v4l2] Format details:\n");
+  printf("  Width: %d\n", fmt->fmt.pix.width);
+  printf("  Height: %d\n", fmt->fmt.pix.height);
+  printf("  Pixelformat: %c%c%c%c\n",
+         (fmt->fmt.pix.pixelformat >> 0) & 0xFF,
+         (fmt->fmt.pix.pixelformat >> 8) & 0xFF,
+         (fmt->fmt.pix.pixelformat >> 16) & 0xFF,
+         (fmt->fmt.pix.pixelformat >> 24) & 0xFF);
+}
+
 /**
  * Initialize a V4L2(Video for Linux 2) device.
  * Note that the device must be closed with v4l2_close(dev) at the end.
@@ -261,12 +272,39 @@ struct v4l2_device *v4l2_init(char *device_name, struct img_size_t size, struct 
   fmt.fmt.pix.colorspace = V4L2_COLORSPACE_REC709;
   fmt.fmt.pix.field = V4L2_FIELD_NONE;
 
+  // Print requested format
+  printf("[v4l2] Requesting format for %s:\n", device_name);
+  print_v4l2_format(&fmt);
+
+  // Try to set format
   if (ioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
-    printf("[v4l2] Could not set data format settings of %s\n", device_name);
+    printf("[v4l2] Setting format failed: %s\n", strerror(errno));
+    
+    // Try to get current format
+    struct v4l2_format curr_fmt;
+    CLEAR(curr_fmt);
+    curr_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(fd, VIDIOC_G_FMT, &curr_fmt) >= 0) {
+        printf("[v4l2] Current device format:\n");
+        print_v4l2_format(&curr_fmt);
+    }
+    
     close(fd);
     return NULL;
   }
 
+  struct v4l2_format verify_fmt;
+  CLEAR(verify_fmt);
+  verify_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  if (ioctl(fd, VIDIOC_G_FMT, &verify_fmt) >= 0) {
+      if (verify_fmt.fmt.pix.width != fmt.fmt.pix.width ||
+          verify_fmt.fmt.pix.height != fmt.fmt.pix.height ||
+          verify_fmt.fmt.pix.pixelformat != fmt.fmt.pix.pixelformat) {
+          printf("[v4l2] Warning: Got different format than requested:\n");
+          print_v4l2_format(&verify_fmt);
+      }
+  }
+  
   // Request MMAP buffers
   req.count = buffers_cnt;
   req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;

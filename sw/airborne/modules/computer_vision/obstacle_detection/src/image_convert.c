@@ -6,11 +6,6 @@
 #include "debug_print.h"
 DEFINE_DEBUG_PRINT("IMG_CONVERT")
 
-#define FRONT_CAMERA_WIDTH 240
-#define FRONT_CAMERA_HEIGHT 520
-#define BOTTOM_CAMERA_WIDTH 240
-#define BOTTOM_CAMERA_HEIGHT 240
-
 // Lookup tables for YUV to RGB conversion
 static float yuv_to_r[256][256]; // y, v -> r
 static float yuv_to_g[256][256][256]; // y, u, v -> g
@@ -194,33 +189,6 @@ static bool convert_uyvy_to_rgb_common(const uint8_t* uyvy_data,
             i
         );
     }
-
-    // Debug output
-    // printf("[Convert] First few RGB values:\n");
-    // for(int i = 0; i < 4; i++) {
-    //     printf("Pixel %d: R=%.2f G=%.2f B=%.2f\n",
-    //         i,
-    //         r_channel[i],
-    //         g_channel[i],
-    //         b_channel[i]
-    //     );
-    // }
-
-    // // Calculate and print channel ranges
-    // float r_min = r_channel[0], r_max = r_channel[0];
-    // float g_min = g_channel[0], g_max = g_channel[0];
-    // float b_min = b_channel[0], b_max = b_channel[0];
-    // for(int i = 0; i < width * height; i++) {
-    //     r_min = fminf(r_min, r_channel[i]);
-    //     r_max = fmaxf(r_max, r_channel[i]);
-    //     g_min = fminf(g_min, g_channel[i]);
-    //     g_max = fmaxf(g_max, g_channel[i]);
-    //     b_min = fminf(b_min, b_channel[i]);
-    //     b_max = fmaxf(b_max, b_channel[i]);
-    // }
-    // printf("[Convert] Channel ranges - R: %.2f to %.2f, G: %.2f to %.2f, B: %.2f to %.2f\n",
-    //     r_min, r_max, g_min, g_max, b_min, b_max);
-
     return true;
 }
 
@@ -263,4 +231,67 @@ bool convert_uyvy_to_rgb_bottom(const uint8_t* uyvy_data,
     }
 
     return convert_uyvy_to_rgb_common(uyvy_data, width, height, rgb_buffer, buffer_size);
+}
+
+bool convert_uyvy_to_yuv_bottom(const uint8_t* uyvy_data, 
+    int width, 
+    int height,
+    float* yuv_buffer,
+    size_t buffer_size) {
+    
+    // Expect 240x240 input, 120x120 output
+    if (width != 240 || height != 240) {
+        debug_print("Invalid input dimensions: got %dx%d, expected 240x240",
+            width, height);
+        return false;
+    }
+
+    // Check buffer size for 120x120 output
+    size_t required_size = 120 * 120 * 3 * sizeof(float);
+    if (buffer_size != required_size) {
+        debug_print("Invalid buffer size: got %zu, need %zu", buffer_size, required_size);
+        return false;
+    }
+
+    if (!uyvy_data || !yuv_buffer) {
+        debug_print("Null pointers provided");
+        return false;
+    }
+
+    float* y_channel = yuv_buffer;
+    float* u_channel = yuv_buffer + (120 * 120);
+    float* v_channel = yuv_buffer + (2 * 120 * 120);
+
+    // Process 4x2 input pixels at a time to produce 2x1 output pixels
+    for(int out_y = 0; out_y < 120; out_y++) {
+        for(int out_x = 0; out_x < 120; out_x += 2) {
+            int in_y = out_y * 2;
+            int in_x = out_x * 2;
+            
+            // Get input index (4 bytes per 2 pixels)
+            int in_idx = (in_y * 240 + in_x) * 2;
+            int out_idx = out_y * 120 + out_x;
+
+            // Extract UYVY values
+            uint8_t u1 = uyvy_data[in_idx];
+            uint8_t y1 = uyvy_data[in_idx + 1];
+            uint8_t v1 = uyvy_data[in_idx + 2];
+            uint8_t y2 = uyvy_data[in_idx + 3];
+
+            // Store Y values (normalized to [0,1])
+            y_channel[out_idx] = y1 / 255.0f;
+            y_channel[out_idx + 1] = y2 / 255.0f;
+
+            // Store U and V values (normalized to [-0.5,0.5])
+            float u_norm = (u1 / 255.0f) - 0.5f;
+            float v_norm = (v1 / 255.0f) - 0.5f;
+
+            u_channel[out_idx] = u_norm;
+            u_channel[out_idx + 1] = u_norm;
+            v_channel[out_idx] = v_norm;
+            v_channel[out_idx + 1] = v_norm;
+        }
+    }
+
+    return true;
 }

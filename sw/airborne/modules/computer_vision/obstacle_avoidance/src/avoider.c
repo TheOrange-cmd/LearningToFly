@@ -43,6 +43,10 @@ static bool initialized = false;
 static bool avoider_enabled = false;
 static float latest_floor_value = 0.0f;
 
+// time logging variables
+static struct timeval start_time;
+static struct timeval current_time;
+
 // Debug configuration
 #define DEBUG_TAG "AVOIDER"
 #define MAX_LOG_LENGTH 256
@@ -193,6 +197,14 @@ float calculate_steering_command(float *speed_sp, float *heading_rate_sp) {
 void modeldata_handler(uint8_t sender_id, uint8_t output_type, uint8_t rows, uint8_t cols, float* values) {
     if (!initialized) return;
 
+    if (filtered_data.frames_processed % 100 == 0) {
+        // get current time
+        gettimeofday(&current_time, NULL);
+        float time_diff = (current_time.tv_sec - start_time.tv_sec) + (current_time.tv_usec - start_time.tv_usec) / 1000000.0f;
+        debug_print("Obstacle data received: %d messages received. Messages per second: %.2f", 
+            filtered_data.frames_processed, filtered_data.frames_processed / time_diff);
+    }
+
     if (output_type == MODEL_TYPE_OBSTACLE) {
         // printf("[Avoider] Obstacle data received\n");
         // Reallocate filtered data if dimensions change
@@ -251,6 +263,8 @@ void obstacle_avoider_init(void) {
     filtered_data.cols = 0;
     filtered_data.frames_processed = 0;
 
+
+
     // Clear floor values
     for (int i = 0; i < FILTER_BUFFER_SIZE; i++) {
         filtered_data.floor_value[i] = 0;
@@ -268,6 +282,9 @@ void obstacle_avoider_init(void) {
     
     initialized = true;
     debug_print("Avoider initialized");
+    // get start time
+    gettimeofday(&start_time, NULL);
+
 }
 
 void start_avoider(void) {

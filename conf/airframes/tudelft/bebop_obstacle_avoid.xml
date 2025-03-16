@@ -9,7 +9,6 @@
     <target name="ap" board="bebop">
       <define name="VIDEO_CAPTURE_PATH" value="/data/ftp/internal_000/images"/>
       <define name="LOGGER_FILE_PATH" value="/data/ftp/internal_000/log"/>
-      <define name="MT9V117_TARGET_FPS" value="20"/>
     </target>
 
     <target name="nps" board="pc">
@@ -41,10 +40,11 @@
 
     <!-- Video/Camera modules -->
     <module name="bebop_cam">
-      <configure name="BEBOP_FRONT_CAMERA_TYPE" value="MT9F002"/>
-      <define name="MT9F002_INITIAL_OFFSET_X" value="2048"/>
-      <define name="MT9F002_INITIAL_OFFSET_Y" value="2048"/>
+      <!-- <configure name="BEBOP_FRONT_CAMERA_TYPE" value="MT9F002"/>
+      <define name="INITIAL_OFFSET_X" value="2048"/>
+      <define name="INITIAL_OFFSET_Y" value="2048"/>
       <define name="BEBOP_CAMERA_ON_USB" value="FALSE"/>
+      <define name="TARGET_FPS" value="10"/> -->
     </module>
 
     <module name="video_capture">
@@ -53,7 +53,7 @@
     </module>
 
     <module name="video_thread">
-      <define name="VIDEO_THREAD_FPS" value="20"/>
+      <define name="VIDEO_THREAD_FPS" value="10"/>
       <define name="VIDEO_THREAD_CAMERA" value="front_camera"/>
     </module>
     
@@ -65,6 +65,26 @@
       <define name="VIEWVIDEO_QUALITY_FACTOR" value="40"/>
     </module>
   </firmware>
+
+  <section name="BEBOP_FRONT_CAMERA" prefix="MT9F002_">
+    <define name="OUTPUT_HEIGHT" value="520"/>
+    <define name="OUTPUT_WIDTH" value="240"/>
+    <define name="OFFSET_X" value="0.09"/>
+    <define name="OFFSET_Y" value="0.00"/>
+    <define name="ZOOM" value="1.25"/>
+    <define name="GAIN_GREEN1" value="10.0"/>
+    <define name="GAIN_GREEN2" value="10.0"/>
+    <define name="GAIN_BLUE" value="12.5"/>
+    <define name="GAIN_RED" value="9.0"/>
+    <define name="TARGET_EXPOSURE" value="30"/>
+    <define name="TARGET_FPS" value="5"/>
+  </section>
+
+  <section name="BEBOP_BOTTOM_CAMERA" prefix="MT9V117_">
+    <define name="OUTPUT_HEIGHT" value="240"/>
+    <define name="OUTPUT_WIDTH" value="240"/>
+    <define name="TARGET_FPS" value="10"/>
+  </section>
 
   <commands>
     <axis name="PITCH" failsafe_value="0"/>
@@ -107,18 +127,7 @@
     <set servo="BOTTOM_LEFT" value="motor_mixing.commands[MOTOR_BACK_LEFT]"/>
   </command_laws>
 
-  <section name="BEBOP_FRONT_CAMERA" prefix="MT9F002_">
-    <define name="OUTPUT_HEIGHT" value="520"/>
-    <define name="OUTPUT_WIDTH" value="240"/>
-    <define name="OFFSET_X" value="0.09"/>
-    <define name="OFFSET_Y" value="0.00"/>
-    <define name="ZOOM" value="1.25"/>
-    <define name="GAIN_GREEN1" value="10.0"/>
-    <define name="GAIN_GREEN2" value="10.0"/>
-    <define name="GAIN_BLUE" value="12.5"/>
-    <define name="GAIN_RED" value="9.0"/>
-    <define name="TARGET_EXPOSURE" value="30"/>
-  </section>
+
 
 <!-- Gazebo cam -->
   <section name="GAZEBO_CAM" prefix="GAZEBO_CAM_">

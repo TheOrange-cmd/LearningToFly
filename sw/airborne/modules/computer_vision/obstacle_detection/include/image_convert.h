@@ -25,4 +25,10 @@ bool convert_uyvy_to_rgb_bottom(const uint8_t* uyvy_data,
     float* rgb_buffer,
     size_t buffer_size);
 
+bool convert_uyvy_to_yuv_bottom(const uint8_t* uyvy_data, 
+    int width, 
+    int height,
+    float* yuv_buffer,
+    size_t buffer_size);
+
 #endif // IMAGE_CONVERT_H

@@ -3,10 +3,10 @@
 #define BORDER_MODEL_WRAPPER_H
 
 // First declare the original entry function signature
-void entry(const float tensor_input[1][3][240][240], float tensor_output[1][1]);
+void entry(const float tensor_input[1][3][120][120], float tensor_output[1][1]);
 
 // Then declare our wrapper function that will call it
-void entry_border(const float tensor_input[1][3][240][240], float tensor_output[1][1]);
+void entry_border(const float tensor_input[1][3][120][120], float tensor_output[1][1]);
 
 void clear_border_tensors(void);
 void print_tensor_debug_info(const float* input_tensor, const float* output_tensor);
