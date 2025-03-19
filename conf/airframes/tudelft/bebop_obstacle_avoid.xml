@@ -38,6 +38,8 @@
     <module name="obstacle_avoider_obstacle_detection"/>
     <module name="obstacle_avoider_avoider"/>
 
+    <!-- sysmon -->
+    <module name="sys_mon"/>
     <!-- Video/Camera modules -->
     <module name="bebop_cam">
       <!-- <configure name="BEBOP_FRONT_CAMERA_TYPE" value="MT9F002"/>
