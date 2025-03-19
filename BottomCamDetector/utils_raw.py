@@ -207,12 +207,13 @@ def evaluate_model(model, dataloader, device):
     
     return metrics
 
-def save_checkpoint(model, optimizer, scheduler, epoch, metrics, path):
+def save_checkpoint(model, optimizer, scheduler, epoch, metrics, path, config):
     torch.save({
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+        'model_config': config,
         'metrics': metrics,
     }, path)
 
@@ -223,7 +224,7 @@ def export_to_onnx(model, output_path):
     model.eval()
     
     # Create dummy input
-    dummy_input = torch.randn(1, 3, 120, 120)
+    dummy_input = torch.randn(1, 3, model.input_size, model.input_size)
     
     # Export the model
     torch.onnx.export(model,

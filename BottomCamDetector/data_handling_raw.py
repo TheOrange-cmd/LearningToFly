@@ -5,29 +5,63 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-def reshape_uyvy_to_yuv(uyvy_data):
+def reshape_uyvy_to_yuv(uyvy_data, downscale_factor=2):
     """
-    Reshape 120x120 UYVY data into YUV channels
+    Reshape 120x120 UYVY data into YUV channels with optional downscaling
     Input: raw UYVY data (120x240 uint8 array, since each pixel needs 2 bytes)
-    Output: (3, 120, 120) float32 array with separate Y, U, V channels, normalized to [0,1]
+    Output: (3, output_height, output_width) float32 array with separate Y, U, V channels, normalized to [0,1]
     """
-    uyvy = uyvy_data.reshape(-1, 4)  # reshape to Nx4 where each row is U,Y1,V,Y2
+    if downscale_factor not in [2, 4]:
+        raise ValueError("Downscale factor must be 2 or 4")
+        
+    height, width = 120, 120
+    out_height = height // downscale_factor
+    out_width = width // downscale_factor
     
-    # Extract components
-    u = uyvy[:, 0].astype(np.float32) / 255.0  # U values
-    y1 = uyvy[:, 1].astype(np.float32) / 255.0  # First Y value
-    v = uyvy[:, 2].astype(np.float32) / 255.0  # V values
-    y2 = uyvy[:, 3].astype(np.float32) / 255.0  # Second Y value
+    # Reshape input to 2D array where each row represents pixels in UYVY format
+    uyvy = uyvy_data.reshape(height, -1)
     
-    # Reshape Y values into final resolution
-    y = np.zeros(120*120, dtype=np.float32)
-    y[0::2] = y1  # odd pixels
-    y[1::2] = y2  # even pixels
-    y = y.reshape(120, 120)
+    # Initialize output arrays
+    y = np.zeros((out_height, out_width), dtype=np.float32)
+    u = np.zeros((out_height, out_width), dtype=np.float32)
+    v = np.zeros((out_height, out_width), dtype=np.float32)
     
-    # Reshape and upsample U and V
-    u = u.repeat(2).reshape(120, 120)  # Each U value applies to 2 pixels
-    v = v.repeat(2).reshape(120, 120)  # Each V value applies to 2 pixels
+    # Process blocks
+    for out_y in range(out_height):
+        for out_x in range(out_width):
+            y_sum = 0
+            u_sum = 0
+            v_sum = 0
+            count = 0
+            
+            # Process each pixel in the block
+            for dy in range(downscale_factor):
+                in_y = out_y * downscale_factor + dy
+                for dx in range(downscale_factor):
+                    in_x = out_x * downscale_factor + dx
+                    
+                    # Calculate indices in UYVY format
+                    uyvy_idx = in_x * 2
+                    
+                    # Extract YUV values
+                    if dx % 2 == 0:  # Even pixels
+                        y_val = uyvy[in_y, uyvy_idx + 1]
+                        u_val = uyvy[in_y, uyvy_idx]
+                        v_val = uyvy[in_y, uyvy_idx + 2]
+                    else:  # Odd pixels
+                        y_val = uyvy[in_y, uyvy_idx + 1]
+                        u_val = uyvy[in_y, uyvy_idx - 2]
+                        v_val = uyvy[in_y, uyvy_idx]
+                    
+                    y_sum += y_val
+                    u_sum += u_val
+                    v_sum += v_val
+                    count += 1
+            
+            # Average and normalize
+            y[out_y, out_x] = (y_sum / count) / 255.0
+            u[out_y, out_x] = (u_sum / count) / 255.0 - 0.5
+            v[out_y, out_x] = (v_sum / count) / 255.0 - 0.5
     
     # Stack channels
     yuv = np.stack([y, u, v])
@@ -135,7 +169,37 @@ def test_rotations():
         print(f"Padding: {result['padding_percent']:.1f}%")
         print("---")
 
-def prepare_dataset(base_dir, num_rotations=2, augment_brightness_contrast=True):
+def prepare_datasets_for_configs(configs, data_dir):
+    # Create a dictionary to store unique dataset configurations
+    dataset_configs = {}
+    
+    for config in configs:
+        # Create a key based on dataset-specific parameters
+        dataset_key = (
+            config['num_rotations'],
+            config['augment_brightness_contrast'],
+            config['downscale_factor']
+        )
+        
+        # Only prepare dataset if we haven't seen these parameters before
+        if dataset_key not in dataset_configs:
+            print(f"\nPreparing dataset with parameters:")
+            print(f"- num_rotations: {config['num_rotations']}")
+            print(f"- augment_brightness_contrast: {config['augment_brightness_contrast']}")
+            print(f"- downscale_factor: {config['downscale_factor']}")
+            
+            images, labels, sources = prepare_dataset(
+                data_dir,
+                num_rotations=config['num_rotations'],
+                augment_brightness_contrast=config['augment_brightness_contrast'],
+                downscale_factor=config['downscale_factor']
+            )
+            
+            dataset_configs[dataset_key] = (images, labels, sources)
+    
+    return dataset_configs
+
+def prepare_dataset(base_dir, num_rotations=2, augment_brightness_contrast=True, downscale_factor=2, debug=False):
     print("Loading and preprocessing dataset...")
     
     # Define allowed rotation angles (5 degrees around multiples of 90)
@@ -149,12 +213,17 @@ def prepare_dataset(base_dir, num_rotations=2, augment_brightness_contrast=True)
     labels = []
     sources = []
     
+    if debug:
+        end = 10
+    else:
+        end = None
+    
     # Process images from boundaries directory
-    for img_path in tqdm(os.listdir(boundaries_dir), desc="Processing boundaries"):
+    for img_path in tqdm(os.listdir(boundaries_dir)[0:end], desc="Processing boundaries"):
         with open(os.path.join(boundaries_dir, img_path), 'rb') as f:
             raw_data = np.frombuffer(f.read(), dtype=np.uint8).reshape(120, 240)
         
-        img = reshape_uyvy_to_yuv(raw_data)  # Now returns float32 [0,1]
+        img = reshape_uyvy_to_yuv(raw_data, downscale_factor=downscale_factor)
         
         # Add original image
         images.append(img)
@@ -177,11 +246,11 @@ def prepare_dataset(base_dir, num_rotations=2, augment_brightness_contrast=True)
     
     # Process confirmed_floor and unlabeled
     for directory, label in [(confirmed_floor_dir, 0), (unlabeled_dir, 0)]:
-        for img_path in tqdm(os.listdir(directory), desc=f"Processing {os.path.basename(directory)}"):
+        for img_path in tqdm(os.listdir(directory)[0:end], desc=f"Processing {os.path.basename(directory)}"):
             with open(os.path.join(directory, img_path), 'rb') as f:
                 raw_data = np.frombuffer(f.read(), dtype=np.uint8).reshape(120, 240)
             
-            img = reshape_uyvy_to_yuv(raw_data)
+            img = reshape_uyvy_to_yuv(raw_data, downscale_factor=downscale_factor)
             images.append(img)
             labels.append(label)
             sources.append(os.path.basename(directory))
@@ -203,7 +272,7 @@ def prepare_dataset(base_dir, num_rotations=2, augment_brightness_contrast=True)
 
 class BorderDataset(Dataset):
     def __init__(self, images, labels):
-        self.images = images  # shape: (N, 3, 120, 120) float32 [0,1]
+        self.images = images  
         self.labels = labels
         
     def __len__(self):
@@ -213,3 +282,19 @@ class BorderDataset(Dataset):
         img = torch.from_numpy(self.images[idx].copy())  # Already float32 [0,1]
         label = torch.tensor([self.labels[idx]], dtype=torch.float32)
         return img, label
+
+# class BorderDataset(Dataset):
+#     def __init__(self, images, labels):
+#         self.images = images  
+#         self.labels = labels.squeeze() if isinstance(labels, np.ndarray) else labels
+        
+#     def __len__(self):
+#         return len(self.labels)
+
+#     def __getitem__(self, idx):
+#         img = torch.from_numpy(self.images[idx].copy())
+#         label = torch.tensor([self.labels[idx]], dtype=torch.float32)
+#         #  reshape to [1,1] tensor
+#         label = label.view(1, 1)
+#         print(f"Dataset output shapes - img: {img.shape}, label: {label.shape}")
+#         return img, label

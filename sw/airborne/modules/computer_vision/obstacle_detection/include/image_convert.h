@@ -29,6 +29,6 @@ bool convert_uyvy_to_yuv_bottom(const uint8_t* uyvy_data,
     int width, 
     int height,
     float* yuv_buffer,
-    size_t buffer_size);
+    size_t buffer_size, int downscale_factor);
 
 #endif // IMAGE_CONVERT_H

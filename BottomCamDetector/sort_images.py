@@ -32,6 +32,10 @@ class ImageSorter:
             'folder3': self.raw_dir.parent / 'split/unlabeled'
         }
         
+        # create root directory split inside the parent directory
+        split_dir = self.raw_dir.parent / 'split'
+        split_dir.mkdir(exist_ok=True)
+
         for dir_path in self.output_dirs.values():
             dir_path.mkdir(exist_ok=True)
         
@@ -189,10 +193,10 @@ class ImageSorter:
 
 # Usage
 if __name__ == "__main__":
-    raw_dir = "./drone_pictures"  
+    raw_dir = "./verified_images_raw/new_drone"  
     # original dimensions
     width = 240  
-    height = 240
+    height = 520
     downsample = True  # Set to True to enable downsampling by factor of 2
     
     sorter = ImageSorter(raw_dir, width, height, downsample)

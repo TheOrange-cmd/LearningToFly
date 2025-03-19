@@ -227,3 +227,5 @@ tests/results/*
 /BottomCamDetector/results_raw
 /BottomCamDetector/split
 /BottomCamDetector/verified_images_raw
+/BottomCamDetector/experiments_cv
+/BottomCamDetector/promising_models

@@ -233,21 +233,24 @@ bool convert_uyvy_to_rgb_bottom(const uint8_t* uyvy_data,
     return convert_uyvy_to_rgb_common(uyvy_data, width, height, rgb_buffer, buffer_size);
 }
 
-bool convert_uyvy_to_yuv_bottom(const uint8_t* uyvy_data, 
-    int width, 
+// Highly optimized version for 2x downscaling
+bool convert_uyvy_to_yuv_downscale2(const uint8_t* uyvy_data,
+    int width,
     int height,
     float* yuv_buffer,
     size_t buffer_size) {
-    
-    // Expect 240x240 input, 120x120 output
-    if (width != 240 || height != 240) {
-        debug_print("Invalid input dimensions: got %dx%d, expected 240x240",
-            width, height);
+    // Fixed 2x downscaling: original (width x height) -> (width/2 x height/2)
+    int out_width = width / 2;
+    int out_height = height / 2;
+
+    // Check dimensions are even
+    if (width % 2 != 0 || height % 2 != 0) {
+        debug_print("Input dimensions must be divisible by 2");
         return false;
     }
 
-    // Check buffer size for 120x120 output
-    size_t required_size = 120 * 120 * 3 * sizeof(float);
+    // Check buffer size
+    size_t required_size = out_width * out_height * 3 * sizeof(float);
     if (buffer_size != required_size) {
         debug_print("Invalid buffer size: got %zu, need %zu", buffer_size, required_size);
         return false;
@@ -259,39 +262,227 @@ bool convert_uyvy_to_yuv_bottom(const uint8_t* uyvy_data,
     }
 
     float* y_channel = yuv_buffer;
-    float* u_channel = yuv_buffer + (120 * 120);
-    float* v_channel = yuv_buffer + (2 * 120 * 120);
+    float* u_channel = yuv_buffer + (out_width * out_height);
+    float* v_channel = yuv_buffer + (2 * out_width * out_height);
 
-    // Process 4x2 input pixels at a time to produce 2x1 output pixels
-    for(int out_y = 0; out_y < 120; out_y++) {
-        for(int out_x = 0; out_x < 120; out_x += 2) {
-            int in_y = out_y * 2;
+    const float inv_255 = 1.0f / 255.0f;
+    const int stride = width * 2;  // Bytes per row
+
+    // Process 2x2 blocks - hardcoded for maximum efficiency
+    for (int out_y = 0; out_y < out_height; out_y++) {
+        int in_y = out_y * 2;
+        int out_idx_base = out_y * out_width;
+        const uint8_t* row1 = uyvy_data + in_y * stride;
+        const uint8_t* row2 = row1 + stride;
+
+        for (int out_x = 0; out_x < out_width; out_x++) {
             int in_x = out_x * 2;
-            
-            // Get input index (4 bytes per 2 pixels)
-            int in_idx = (in_y * 240 + in_x) * 2;
-            int out_idx = out_y * 120 + out_x;
+            int out_idx = out_idx_base + out_x;
+            int in_idx = in_x * 2;
 
-            // Extract UYVY values
-            uint8_t u1 = uyvy_data[in_idx];
-            uint8_t y1 = uyvy_data[in_idx + 1];
-            uint8_t v1 = uyvy_data[in_idx + 2];
-            uint8_t y2 = uyvy_data[in_idx + 3];
+            // Get 4 bytes from top row (2 pixels)
+            uint8_t u1 = row1[in_idx];
+            uint8_t y1 = row1[in_idx + 1];
+            uint8_t v1 = row1[in_idx + 2];
+            uint8_t y2 = row1[in_idx + 3];
 
-            // Store Y values (normalized to [0,1])
-            y_channel[out_idx] = y1 / 255.0f;
-            y_channel[out_idx + 1] = y2 / 255.0f;
+            // Get 4 bytes from bottom row (2 pixels)
+            uint8_t u2 = row2[in_idx];
+            uint8_t y3 = row2[in_idx + 1];
+            uint8_t v2 = row2[in_idx + 2];
+            uint8_t y4 = row2[in_idx + 3];
 
-            // Store U and V values (normalized to [-0.5,0.5])
-            float u_norm = (u1 / 255.0f) - 0.5f;
-            float v_norm = (v1 / 255.0f) - 0.5f;
+            // Average 4 Y values at once
+            y_channel[out_idx] = (y1 + y2 + y3 + y4) * 0.25f * inv_255;
 
-            u_channel[out_idx] = u_norm;
-            u_channel[out_idx + 1] = u_norm;
-            v_channel[out_idx] = v_norm;
-            v_channel[out_idx + 1] = v_norm;
+            // Average U and V values
+            u_channel[out_idx] = (u1 + u2) * 0.5f * inv_255 - 0.5f;
+            v_channel[out_idx] = (v1 + v2) * 0.5f * inv_255 - 0.5f;
+        }
+    }
+    return true;
+}
+
+// Highly optimized version for 4x downscaling
+bool convert_uyvy_to_yuv_downscale4(const uint8_t* uyvy_data,
+     int width,
+     int height,
+     float* yuv_buffer,
+     size_t buffer_size) {
+    // Fixed 4x downscaling: original (width x height) -> (width/4 x height/4)
+    int out_width = width / 4;
+    int out_height = height / 4;
+
+    // Check dimensions are divisible by 4
+    if (width % 4 != 0 || height % 4 != 0) {
+        debug_print("Input dimensions must be divisible by 4");
+        return false;
+    }
+
+    // Check buffer size
+    size_t required_size = out_width * out_height * 3 * sizeof(float);
+    if (buffer_size != required_size) {
+        debug_print("Invalid buffer size: got %zu, need %zu", buffer_size, required_size);
+        return false;
+    }
+
+    if (!uyvy_data || !yuv_buffer) {
+        debug_print("Null pointers provided");
+        return false;
+    }
+
+    float* y_channel = yuv_buffer;
+    float* u_channel = yuv_buffer + (out_width * out_height);
+    float* v_channel = yuv_buffer + (2 * out_width * out_height);
+
+    const float inv_255 = 1.0f / 255.0f;
+    const float one_sixteenth = 1.0f / 16.0f;
+    const float one_fourth = 0.25f;
+    const int stride = width * 2;  // Bytes per row in UYVY format
+
+    // For 4x4 block, we have 8 UYVY groups (16 pixels)
+    for (int out_y = 0; out_y < out_height; out_y++) {
+        int in_y_base = out_y * 4;
+
+        for (int out_x = 0; out_x < out_width; out_x++) {
+            int in_x_base = out_x * 4;
+            int out_idx = out_y * out_width + out_x;
+
+            // Accumulators
+            float y_sum = 0.0f;
+            float u_sum = 0.0f;
+            float v_sum = 0.0f;
+
+            // Process 4 rows
+            for (int y_offset = 0; y_offset < 4; y_offset++) {
+                int in_y = in_y_base + y_offset;
+                const uint8_t* row = uyvy_data + in_y * stride;
+
+                // Process 2 UYVY groups per row (4 pixels)
+                for (int x_group = 0; x_group < 2; x_group++) {
+                    int in_idx = (in_x_base + x_group * 2) * 2;
+
+                    // Extract values for 2 pixels in this group
+                    uint8_t u = row[in_idx];
+                    uint8_t y1 = row[in_idx + 1];
+                    uint8_t v = row[in_idx + 2];
+                    uint8_t y2 = row[in_idx + 3];
+
+                    // Accumulate values
+                    y_sum += y1 + y2;
+                    u_sum += u;
+                    v_sum += v;
+                }
+            }
+
+        // Store averaged values
+        y_channel[out_idx] = y_sum * one_sixteenth * inv_255;    // Average of 16 Y values
+        u_channel[out_idx] = u_sum * one_fourth * inv_255 - 0.5f; // Average of 8 U values
+        v_channel[out_idx] = v_sum * one_fourth * inv_255 - 0.5f; // Average of 8 V values
         }
     }
 
     return true;
+}
+
+// Highly optimized version for 8x downscaling
+bool convert_uyvy_to_yuv_downscale8(const uint8_t* uyvy_data,
+    int width,
+    int height,
+    float* yuv_buffer,
+    size_t buffer_size) {
+   // Fixed 8x downscaling: original (width x height) -> (width/8 x height/8)
+   int out_width = width / 8;
+   int out_height = height / 8;
+
+   // Check dimensions are divisible by 8
+   if (width % 8 != 0 || height % 8 != 0) {
+       debug_print("Input dimensions must be divisible by 8");
+       return false;
+   }
+
+   // Check buffer size
+   size_t required_size = out_width * out_height * 3 * sizeof(float);
+   if (buffer_size != required_size) {
+       debug_print("Invalid buffer size: got %zu, need %zu", buffer_size, required_size);
+       return false;
+   }
+
+   if (!uyvy_data || !yuv_buffer) {
+       debug_print("Null pointers provided");
+       return false;
+   }
+
+   float* y_channel = yuv_buffer;
+   float* u_channel = yuv_buffer + (out_width * out_height);
+   float* v_channel = yuv_buffer + (2 * out_width * out_height);
+
+   const float inv_255 = 1.0f / 255.0f;
+   const float one_sixtyfourth = 1.0f / 64.0f;
+   const float one_sixteenth = 1.0f / 16.0f;
+   const int stride = width * 2;  // Bytes per row in UYVY format
+
+   // For 8x8 block, we have 32 UYVY groups (64 pixels)
+   for (int out_y = 0; out_y < out_height; out_y++) {
+       int in_y_base = out_y * 8;
+
+       for (int out_x = 0; out_x < out_width; out_x++) {
+           int in_x_base = out_x * 8;
+           int out_idx = out_y * out_width + out_x;
+
+           // Accumulators
+           float y_sum = 0.0f;
+           float u_sum = 0.0f;
+           float v_sum = 0.0f;
+
+           // Process 8 rows
+           for (int y_offset = 0; y_offset < 8; y_offset++) {
+               int in_y = in_y_base + y_offset;
+               const uint8_t* row = uyvy_data + in_y * stride;
+
+               // Process 4 UYVY groups per row (8 pixels)
+               for (int x_group = 0; x_group < 4; x_group++) {
+                   int in_idx = (in_x_base + x_group * 2) * 2;
+
+                   // Extract values for 2 pixels in this group
+                   uint8_t u = row[in_idx];
+                   uint8_t y1 = row[in_idx + 1];
+                   uint8_t v = row[in_idx + 2];
+                   uint8_t y2 = row[in_idx + 3];
+
+                   // Accumulate values
+                   y_sum += y1 + y2;
+                   u_sum += u;
+                   v_sum += v;
+               }
+           }
+
+           // Store averaged values
+           y_channel[out_idx] = y_sum * one_sixtyfourth * inv_255;    // Average of 64 Y values
+           u_channel[out_idx] = u_sum * one_sixteenth * inv_255 - 0.5f; // Average of 32 U values
+           v_channel[out_idx] = v_sum * one_sixteenth * inv_255 - 0.5f; // Average of 32 V values
+       }
+   }
+
+   return true;
+}
+
+// Wrapper function that calls the appropriate specialized function
+bool convert_uyvy_to_yuv_bottom(const uint8_t* uyvy_data,
+    int width,
+    int height,
+    float* yuv_buffer,
+    size_t buffer_size,
+    int downscale_factor) {
+    switch (downscale_factor) {
+    case 2:
+        return convert_uyvy_to_yuv_downscale2(uyvy_data, width, height, yuv_buffer, buffer_size);
+    case 4:
+        return convert_uyvy_to_yuv_downscale4(uyvy_data, width, height, yuv_buffer, buffer_size);
+    case 8:
+        return convert_uyvy_to_yuv_downscale8(uyvy_data, width, height, yuv_buffer, buffer_size);
+    default:
+        debug_print("Unsupported downscale factor: %d", downscale_factor);
+        return false;
+    }
 }
