@@ -229,3 +229,7 @@ tests/results/*
 /BottomCamDetector/verified_images_raw
 /BottomCamDetector/experiments_cv
 /BottomCamDetector/promising_models
+/BottomCamDetector/benchmark_logs
+/FrontCamDetector/dataset
+/FrontCamDetector/dataset_uyvy
+/FrontCamDetector/front_images
