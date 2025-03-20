@@ -3,5 +3,5 @@
 #include "border_model_wrapper.h"
 
 #define entry entry_border
-#include "models/model_6.c"
+#include "models/model_16.c"
 #undef entry

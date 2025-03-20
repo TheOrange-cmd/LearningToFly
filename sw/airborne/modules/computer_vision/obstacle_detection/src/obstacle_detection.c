@@ -52,13 +52,14 @@ static struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camer
 
 // Global variables
 struct obstacle_detection_t obstacle_detection = {
-    .front_enabled = true,
+    .front_enabled = false,
     .bottom_enabled = true,
     .stream_enabled = false
 };
 
 // bool for debug prints
-static bool debug = false;
+static bool debug = true;
+static bool debug_model = false;
 
 static uint32_t front_frames_received = 0;
 static uint32_t front_frames_processed = 0;
@@ -243,7 +244,18 @@ static void* front_processing_thread(void* arg) {
                 bool inf_success = run_obstacle_inference(
                     front_camera_data.processing.rgb_buffer,
                     img->w, img->h, &model_output);
-                
+                if (inf_success) {
+                    // Send ABI message for obstacle detection
+                    AbiSendMsgMODELDATA(ABI_BROADCAST, 
+                        MODEL_TYPE_OBSTACLE,
+                        MODEL_OUTPUT_ROW_SIZE,
+                        MODEL_OUTPUT_COL_SIZE,
+                        (float*)model_output.values  // Cast 2D array to 1D
+                    );
+                    if (debug_model) {
+                        debug_print("Model output: %.2f", model_output.values);
+                    }
+                }
                 gettimeofday(&t3, NULL);
                 
                 float conv_time = (t2.tv_sec - t1.tv_sec) * 1000.0f + 
@@ -255,7 +267,7 @@ static void* front_processing_thread(void* arg) {
                             conv_time, inf_time);
                 }
             }
-            
+
             image_free(img);
             free(img);
         }
@@ -363,6 +375,18 @@ static void* bottom_processing_thread(void* arg) {
                 bool inf_success = run_border_inference(
                     bottom_camera_data.processing.rgb_buffer,
                     30, 30, &border_output);
+                if(inf_success) {
+                    // Send ABI message for border detection
+                    AbiSendMsgMODELDATA(ABI_BROADCAST,
+                        MODEL_TYPE_BORDER,
+                        1,  // rows
+                        1,  // cols
+                        &border_output.value
+                    );
+                    if (debug_model) {
+                        debug_print("Model output: %.2f", border_output.value);
+                    }
+                }
                 if (debug) {
                     gettimeofday(&t3, NULL);
                 
@@ -373,8 +397,8 @@ static void* bottom_processing_thread(void* arg) {
                     
                     debug_print("Bottom processing times - Convert: %.1fms, Inference: %.1fms",
                               conv_time, inf_time);
+                    
                 }
-                debug_print("Model output: %.2f", border_output.value);
             }
             image_free(img);
             free(img);
@@ -428,8 +452,8 @@ bool obstacle_detection_init(void) {
         return false;
     } 
 
-    front_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_FRONT_CAMERA, front_camera_callback, 0.5, 0);
-    bottom_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_BOTTOM_CAMERA, bottom_camera_callback, 1, 0);
+    front_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_FRONT_CAMERA, front_camera_callback, 1, 0);
+    bottom_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_BOTTOM_CAMERA, bottom_camera_callback, 5, 0);
 
     
     if (front_video_listener == NULL || bottom_video_listener == NULL) {
