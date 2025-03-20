@@ -5,7 +5,7 @@
 // Input specifications (batch size, channels, height, width)
 #define MODEL_INPUT_BATCH 1
 #define MODEL_INPUT_CHANNELS 3
-#define MODEL_INPUT_HEIGHT 520
+#define MODEL_INPUT_HEIGHT 240
 #define MODEL_INPUT_WIDTH 240
 
 // Expected input range 

@@ -52,8 +52,8 @@ static struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camer
 
 // Global variables
 struct obstacle_detection_t obstacle_detection = {
-    .front_enabled = false,
-    .bottom_enabled = true,
+    .front_enabled = true,
+    .bottom_enabled = false,
     .stream_enabled = false
 };
 
@@ -232,10 +232,12 @@ static void* front_processing_thread(void* arg) {
         if (img) {
             struct timeval t1, t2, t3;
             gettimeofday(&t1, NULL);
-            
-            bool conv_success = convert_uyvy_to_rgb_front(img->buf, img->w, img->h,
-                                front_camera_data.processing.rgb_buffer,
-                                front_camera_data.processing.rgb_buffer_size);
+
+            bool conv_success = convert_uyvy_to_yuv_crop(img->buf, 
+                img->w, img->h,
+                240, 240,  // Crop dimensions
+                front_camera_data.processing.rgb_buffer,
+                front_camera_data.processing.rgb_buffer_size);
             
             gettimeofday(&t2, NULL);
             
@@ -243,7 +245,7 @@ static void* front_processing_thread(void* arg) {
                 struct model_output_t model_output;
                 bool inf_success = run_obstacle_inference(
                     front_camera_data.processing.rgb_buffer,
-                    img->w, img->h, &model_output);
+                    240, 240, &model_output);
                 if (inf_success) {
                     // Send ABI message for obstacle detection
                     AbiSendMsgMODELDATA(ABI_BROADCAST, 
@@ -272,6 +274,7 @@ static void* front_processing_thread(void* arg) {
             free(img);
         }
     }
+    // free(temp_buffer);
     return NULL;
 }
 
@@ -363,7 +366,7 @@ static void* bottom_processing_thread(void* arg) {
             }
 
             
-            bool conv_success = convert_uyvy_to_yuv_bottom(img->buf, img->w, img->h,
+            bool conv_success = convert_uyvy_to_yuv_downscale(img->buf, img->w, img->h,
                                 bottom_camera_data.processing.rgb_buffer,
                                 bottom_camera_data.processing.rgb_buffer_size, 8);
             if (debug) {
@@ -432,10 +435,13 @@ bool obstacle_detection_init(void) {
     }
 
     // Allocate RGB buffers
-    front_camera_data.processing.rgb_buffer_size = (size_t)FRONT_CAMERA_WIDTH * FRONT_CAMERA_HEIGHT * 3 * sizeof(float);
+    // front_camera_data.processing.rgb_buffer_size = (size_t)FRONT_CAMERA_WIDTH * FRONT_CAMERA_HEIGHT * 3 * sizeof(float);
+    front_camera_data.processing.rgb_buffer_size = (size_t)240 * 240 * 3 * sizeof(float);
     size_t bottom_size = (size_t)30 * 30 * 3 * sizeof(float);
     debug_print("Allocating bottom camera RGB buffer: %dx%d = %zu bytes", 
         30, 30, bottom_size);
+    debug_print("Allocating front camera RGB buffer: %dx%d = %zu bytes", 
+        FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT, front_camera_data.processing.rgb_buffer_size);
     
     front_camera_data.processing.rgb_buffer = malloc(front_camera_data.processing.rgb_buffer_size);
     bottom_camera_data.processing.rgb_buffer_size = bottom_size;
@@ -452,7 +458,7 @@ bool obstacle_detection_init(void) {
         return false;
     } 
 
-    front_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_FRONT_CAMERA, front_camera_callback, 1, 0);
+    front_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_FRONT_CAMERA, front_camera_callback, 5, 0);
     bottom_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_BOTTOM_CAMERA, bottom_camera_callback, 5, 0);
 
     
