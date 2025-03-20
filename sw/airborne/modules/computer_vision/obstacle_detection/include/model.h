@@ -14,6 +14,6 @@
 
 // Output specifications
 #define MODEL_OUTPUT_ROW_SIZE 1
-#define MODEL_OUTPUT_COL_SIZE 5
+#define MODEL_OUTPUT_COL_SIZE 3
 
 #endif // MODEL_SPECS_H

@@ -28,6 +28,8 @@
     <file name="include/image_convert.h"/>
     <file name="include/inference.h"/>
     <file name="include/border_model_wrapper.h"/>
+    <file name="include/image_utils.h"/>
+    <file name="include/queue.h"/>
   </header>
 
   <init fun="obstacle_detection_init()"/>
@@ -65,6 +67,8 @@
     <file name="src/inference.c"/>
     <file name="src/obstacle_model_wrapper.c"/>
     <file name="src/border_model_wrapper.c"/>
+    <file name="src/image_utils.c"/>
+    <file name="src/queue.c"/>
 
     <!-- Include paths -->
     <flag name="CFLAGS" value="I$(PAPARAZZI_HOME)/sw/airborne/modules/computer_vision/obstacle_detection/include"/>

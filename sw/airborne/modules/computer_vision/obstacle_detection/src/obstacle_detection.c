@@ -27,6 +27,8 @@ DEFINE_DEBUG_PRINT("OBSDET")
 #include "obstacle_detection.h"
 #include "inference.h"     // For running inference
 #include "model.h"        // For model dimensions
+#include "queue.h"       // For processing queue
+#include "image_utils.h" // For image saving
 
 // Other includes
 #include "udp_socket.h"
@@ -53,13 +55,13 @@ static struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camer
 // Global variables
 struct obstacle_detection_t obstacle_detection = {
     .front_enabled = true,
-    .bottom_enabled = false,
+    .bottom_enabled = true,
     .stream_enabled = false
 };
 
 // bool for debug prints
-static bool debug = true;
-static bool debug_model = false;
+static bool debug = false;
+static bool debug_model = true;
 
 static uint32_t front_frames_received = 0;
 static uint32_t front_frames_processed = 0;
@@ -83,146 +85,6 @@ static void update_fps(struct timeval *last_time, float *fps) {
     *last_time = now;
 }
 
-
-static void ensure_directory_exists(const char* path) {
-    struct stat st;
-    if (stat(path, &st) == -1) {
-        debug_print("Directory %s does not exist, creating it", path);
-        if (mkdir(path, 0700) == -1) {
-            debug_print("Failed to create directory %s: %s", path, strerror(errno));
-        } else {
-            debug_print("Successfully created directory %s", path);
-        }
-    } else {
-        debug_print("Directory %s already exists", path);
-    }
-}
-
-static void save_yuv_image(const uint8_t* data, int width, int height, const char* filename) {
-    debug_print("Attempting to save YUV image to %s", filename);
-    
-    if (!data) {
-        debug_print("YUV data pointer is NULL");
-        return;
-    }
-
-    FILE* f = fopen(filename, "wb");
-    if (!f) {
-        debug_print("Failed to open file for writing: %s - Error: %s", filename, strerror(errno));
-        return;
-    }
-
-    size_t bytes_written = fwrite(data, 1, width * height * 2, f);
-    if (bytes_written != width * height * 2) {
-        debug_print("Failed to write all data. Wrote %zu of %d bytes", 
-            bytes_written, width * height * 2);
-    } else {
-        debug_print("Successfully wrote %zu bytes to %s", bytes_written, filename);
-    }
-
-    fclose(f);
-}
-
-static void save_rgb_image(const float* r_data, const float* g_data, const float* b_data, 
-                          int width, int height, const char* filename) {
-    debug_print("Attempting to save RGB image to %s", filename);
-    
-    if (!r_data || !g_data || !b_data) {
-        debug_print("One or more RGB data pointers is NULL");
-        return;
-    }
-
-    uint8_t* rgb = malloc(width * height * 3);
-    if (!rgb) {
-        debug_print("Failed to allocate RGB buffer for saving");
-        return;
-    }
-
-    // Convert float [0,1] to byte [0,255]
-    for (int i = 0; i < width * height; i++) {
-        rgb[i*3] = (uint8_t)(r_data[i] * 255.0f);
-        rgb[i*3+1] = (uint8_t)(g_data[i] * 255.0f);
-        rgb[i*3+2] = (uint8_t)(b_data[i] * 255.0f);
-    }
-
-    FILE* f = fopen(filename, "wb");
-    if (!f) {
-        debug_print("Failed to open file for writing: %s - Error: %s", filename, strerror(errno));
-        free(rgb);
-        return;
-    }
-
-    // Write PPM header
-    fprintf(f, "P6\n%d %d\n255\n", width, height);
-    
-    // Write image data
-    size_t bytes_written = fwrite(rgb, 1, width * height * 3, f);
-    if (bytes_written != width * height * 3) {
-        debug_print("Failed to write all data. Wrote %zu of %d bytes", 
-            bytes_written, width * height * 3);
-    } else {
-        debug_print("Successfully wrote %zu bytes to %s", bytes_written, filename);
-    }
-    
-    fclose(f);
-    free(rgb);
-}
-
-// Queue implementation
-static bool queue_init(struct image_queue_t* q) {
-    q->front = 0;
-    q->rear = -1;
-    q->size = 0;
-    pthread_mutex_init(&q->mutex, NULL);
-    pthread_cond_init(&q->not_empty, NULL);
-    pthread_cond_init(&q->not_full, NULL);
-    return true;
-}
-
-static bool queue_push(struct image_queue_t* q, struct image_t* img) {
-    pthread_mutex_lock(&q->mutex);
-    
-    // If queue is full, drop the oldest frame
-    if (q->size >= MAX_QUEUE_SIZE) {
-        // Free the oldest frame
-        struct image_t* old_img = q->images[q->front];
-        if (old_img) {
-            image_free(old_img);
-            free(old_img);
-        }
-        
-        // Move front pointer forward
-        q->front = (q->front + 1) % MAX_QUEUE_SIZE;
-        q->size--;
-        // debug_print("Queue full - dropping oldest frame");
-    }
-    
-    // Add new frame
-    q->rear = (q->rear + 1) % MAX_QUEUE_SIZE;
-    q->images[q->rear] = img;
-    q->size++;
-    
-    pthread_cond_signal(&q->not_empty);
-    pthread_mutex_unlock(&q->mutex);
-    return true;
-}
-
-static struct image_t* queue_pop(struct image_queue_t* q) {
-    pthread_mutex_lock(&q->mutex);
-    
-    while (q->size == 0) {
-        pthread_cond_wait(&q->not_empty, &q->mutex);
-    }
-    
-    struct image_t* img = q->images[q->front];
-    q->front = (q->front + 1) % MAX_QUEUE_SIZE;
-    q->size--;
-    
-    pthread_cond_signal(&q->not_full);
-    pthread_mutex_unlock(&q->mutex);
-    return img;
-}
-
 // Processing thread functions
 static void* front_processing_thread(void* arg) {
     struct processing_thread_t* proc = (struct processing_thread_t*)arg;
@@ -235,12 +97,10 @@ static void* front_processing_thread(void* arg) {
 
             bool conv_success = convert_uyvy_to_yuv_crop(img->buf, 
                 img->w, img->h,
-                240, 240,  // Crop dimensions
+                240, 240,
                 front_camera_data.processing.rgb_buffer,
                 front_camera_data.processing.rgb_buffer_size);
-            
-            gettimeofday(&t2, NULL);
-            
+
             if (conv_success) {
                 struct model_output_t model_output;
                 bool inf_success = run_obstacle_inference(
@@ -255,8 +115,13 @@ static void* front_processing_thread(void* arg) {
                         (float*)model_output.values  // Cast 2D array to 1D
                     );
                     if (debug_model) {
-                        debug_print("Model output: %.2f", model_output.values);
+                        debug_print("Front model outputs: %.2f, %.2f, %.2f",
+                            model_output.values[0][0], model_output.values[0][1],
+                            model_output.values[0][2]);
                     }
+                }
+                else {
+                    debug_print("Failed to run front inference");
                 }
                 gettimeofday(&t3, NULL);
                 
@@ -269,12 +134,14 @@ static void* front_processing_thread(void* arg) {
                             conv_time, inf_time);
                 }
             }
+            else {
+                debug_print("Failed to convert front UYVY to YUV");
+            }
 
             image_free(img);
             free(img);
         }
     }
-    // free(temp_buffer);
     return NULL;
 }
 
@@ -387,7 +254,7 @@ static void* bottom_processing_thread(void* arg) {
                         &border_output.value
                     );
                     if (debug_model) {
-                        debug_print("Model output: %.2f", border_output.value);
+                        debug_print("Bottom model output: %.2f", border_output.value);
                     }
                 }
                 if (debug) {

@@ -7,22 +7,10 @@
 #include <pthread.h>
 #include "modules/computer_vision/lib/vision/image.h"
 #include "video_stream.h"  
+#include "queue.h"
 
 #define MODEL_TYPE_OBSTACLE 0
 #define MODEL_TYPE_BORDER 1
-
-// Queue structure for image processing
-#define MAX_QUEUE_SIZE 4
-
-struct image_queue_t {
-    struct image_t* images[MAX_QUEUE_SIZE];
-    int front;
-    int rear;
-    int size;
-    pthread_mutex_t mutex;
-    pthread_cond_t not_empty;
-    pthread_cond_t not_full;
-};
 
 // Thread control structure
 struct processing_thread_t {

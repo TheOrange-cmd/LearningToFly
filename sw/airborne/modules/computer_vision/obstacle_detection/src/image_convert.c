@@ -258,35 +258,30 @@ bool convert_uyvy_to_yuv_crop(const uint8_t* uyvy_data,
     float* v_channel = yuv_buffer + (2 * crop_width * crop_height);
 
     const float inv_255 = 1.0f / 255.0f;
-    const int stride = orig_width * 2;  // Bytes per row in UYVY format
+    const int stride = orig_width * 2;
     
-    // Calculate crop offsets
     int y_offset = (orig_height - crop_height) / 2;
     int x_offset = (orig_width - crop_width) / 2;
-    
-    // Adjust starting point of input data to crop position
     const uint8_t* input = uyvy_data + (y_offset * stride) + (x_offset * 2);
 
     for (int y = 0; y < crop_height; y++) {
         const uint8_t* row = input + y * stride;
         const int row_offset = y * crop_width;
 
-        // Process two pixels at a time to optimize memory access
         for (int x = 0; x < crop_width; x += 2) {
             int out_idx = row_offset + x;
             int in_idx = x * 2;
 
-            // Load 4 bytes at once (U Y V Y')
             uint8_t u = row[in_idx];
             uint8_t y1 = row[in_idx + 1];
             uint8_t v = row[in_idx + 2];
             uint8_t y2 = row[in_idx + 3];
 
-            // Convert and store Y values
-            y_channel[out_idx] = y1 * inv_255;
-            y_channel[out_idx + 1] = y2 * inv_255;
+            float y_val1 = y1 * inv_255;
+            float y_val2 = y2 * inv_255;
+            y_channel[out_idx] = y_val1;
+            y_channel[out_idx + 1] = y_val2;
 
-            // Convert and store U and V values
             float u_val = u * inv_255 - 0.5f;
             float v_val = v * inv_255 - 0.5f;
             u_channel[out_idx] = u_val;

@@ -25,7 +25,7 @@ extern void entry_border(const float
     float tensor_output[1][1]);
     
 typedef float obstacle_input_tensor_t[MODEL_INPUT_BATCH][MODEL_INPUT_CHANNELS][MODEL_INPUT_HEIGHT][MODEL_INPUT_WIDTH];
-typedef float obstacle_output_tensor_t[1][1][MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE];
+typedef float obstacle_output_tensor_t[MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE];
 typedef float border_input_tensor_t[1][3][30][30];  
 typedef float border_output_tensor_t[1][1];  
 
@@ -53,11 +53,11 @@ bool init_inference(void) {
     return true;
 }
 
-bool run_obstacle_inference(const float* rgb_data, 
+bool run_obstacle_inference(const float* yuv_data, 
     int width,
     int height,
     struct model_output_t* output) {
-    if (!obstacle_input || !obstacle_output || !rgb_data || !output) {
+    if (!obstacle_input || !obstacle_output || !yuv_data || !output) {
         return false;
     }
 
@@ -67,127 +67,58 @@ bool run_obstacle_inference(const float* rgb_data,
         return false;
     }
 
-    // Get pointers to the RGB channels
-    const float* r_data = rgb_data;
-    const float* g_data = rgb_data + (width * height);
-    const float* b_data = rgb_data + (2 * width * height);
+    // Get pointers to the YUV channels
+    const float* y_data = yuv_data;
+    const float* u_data = yuv_data + (width * height);
+    const float* v_data = yuv_data + (2 * width * height);
 
-    // Scale to [0,255] range and copy to input tensor
-    // Assuming input tensor format is [batch][channel][height][width]
+    // Debug: Print some values from the input tensor before copying
+    // debug_print("Input tensor before copy - [0][0][0][0]: %.3f", (*obstacle_input)[0][0][0][0]);
+
+    // Copy to input tensor
     for(int h = 0; h < height; h++) {
         for(int w = 0; w < width; w++) {
             int src_idx = h * width + w;
-            // Red channel
-            (*obstacle_input)[0][0][h][w] = r_data[src_idx] * 255.0f;
-            // Green channel
-            (*obstacle_input)[0][1][h][w] = g_data[src_idx] * 255.0f;
-            // Blue channel
-            (*obstacle_input)[0][2][h][w] = b_data[src_idx] * 255.0f;
+            (*obstacle_input)[0][0][h][w] = y_data[src_idx];
+            (*obstacle_input)[0][1][h][w] = u_data[src_idx];
+            (*obstacle_input)[0][2][h][w] = v_data[src_idx];
         }
     }
+
+    // Debug: Print some values from the input tensor after copying
+    // debug_print("Input tensor after copy - [0][0][0][0]: %.3f, [0][1][0][0]: %.3f, [0][2][0][0]: %.3f",
+    //     (*obstacle_input)[0][0][0][0],
+    //     (*obstacle_input)[0][1][0][0],
+    //     (*obstacle_input)[0][2][0][0]);
 
     memset(obstacle_output, 0, sizeof(obstacle_output_tensor_t));
 
+    // Debug: Print address of entry_obstacle function
+    // debug_print("Calling entry_obstacle at %p", entry_obstacle);
+    
     entry_obstacle(*obstacle_input, *obstacle_output);
 
-    // Copy results to output structure 
-    for (int i = 0; i < MODEL_OUTPUT_ROW_SIZE; i++) {
-        for (int j = 0; j < MODEL_OUTPUT_COL_SIZE; j++) {
-            output->values[i][j] = (*obstacle_output)[0][0][i][j];
-        }
-    }
+    // Treat the output as a flat array
+    float* flat_output = (float*)obstacle_output;
+    
+    // Debug print raw values
+    // debug_print("Raw model outputs: %.3f, %.3f, %.3f", 
+    //     flat_output[0],
+    //     flat_output[1],
+    //     flat_output[2]);
+
+    // Copy results 
+    output->values[0][0] = flat_output[0];
+    output->values[0][1] = flat_output[1];
+    output->values[0][2] = flat_output[2];
+
+    // debug_print("Final outputs after copy: %.3f, %.3f, %.3f",
+    //     output->values[0][0],
+    //     output->values[0][1],
+    //     output->values[0][2]);
 
     return true;
 }
-
-// bool run_border_inference(const float* rgb_data, 
-//     int width,
-//     int height,
-//     struct border_output_t* output) {
-    
-//     if (!border_input || !border_output || !rgb_data || !output) {
-//         debug_print("Null pointer check failed!");
-//         return false;
-//     }
-
-//     const float* r_data = rgb_data;
-//     const float* g_data = rgb_data + (width * height);
-//     const float* b_data = rgb_data + (2 * width * height);
-
-//     // debug_print("Raw RGB range - R: [%.3f, %.3f], G: [%.3f, %.3f], B: [%.3f, %.3f]",
-//     //     r_data[0], r_data[width*height-1],
-//     //     g_data[0], g_data[width*height-1],
-//     //     b_data[0], b_data[width*height-1]);
-
-//     // ImageNet normalization parameters
-//     const float means[3] = {0.485f * 255.0f, 0.456f * 255.0f, 0.406f * 255.0f};
-//     const float stds[3] = {0.229f * 255.0f, 0.224f * 255.0f, 0.225f * 255.0f};
-    
-//     // Process input data
-//     for(int h = 0; h < height; h++) {
-//         for(int w = 0; w < width; w++) {
-//             int src_idx = h * width + w;
-            
-//             // Scale to [0,255] range
-//             // float r = r_data[src_idx] * 255.0f;
-//             // float g = g_data[src_idx] * 255.0f;
-//             // float b = b_data[src_idx] * 255.0f;
-
-//             float r = r_data[src_idx];
-//             float g = g_data[src_idx];
-//             float b = b_data[src_idx];
-    
-//             // Apply ImageNet normalization
-//             r = (r - means[0]) / stds[0];
-//             g = (g - means[1]) / stds[1];
-//             b = (b - means[2]) / stds[2];
-    
-//             (*border_input)[0][0][h][w] = r;
-//             (*border_input)[0][1][h][w] = g;
-//             (*border_input)[0][2][h][w] = b;
-//         }
-//     }
-
-//     // debug_print("First few normalized values - R: %.3f, G: %.3f, B: %.3f", 
-//     //     (*border_input)[0][0][0][0], 
-//     //     (*border_input)[0][1][0][0], 
-//     //     (*border_input)[0][2][0][0]);
-    
-
-//     // Debug prints
-//     // printf("Raw input values (first few):\n");
-//     // printf("R: %.3f %.3f %.3f\n", r_data[0], r_data[1], r_data[2]);
-//     // printf("G: %.3f %.3f %.3f\n", g_data[0], g_data[1], g_data[2]);
-//     // printf("B: %.3f %.3f %.3f\n", b_data[0], b_data[1], b_data[2]);
-
-//     // printf("Normalized values (first few):\n");
-//     // printf("R: %.3f %.3f %.3f\n", (*border_input)[0][0][0][0], 
-//     //        (*border_input)[0][0][0][1], (*border_input)[0][0][0][2]);
-//     // printf("G: %.3f %.3f %.3f\n", (*border_input)[0][1][0][0], 
-//     //        (*border_input)[0][1][0][1], (*border_input)[0][1][0][2]);
-//     // printf("B: %.3f %.3f %.3f\n", (*border_input)[0][2][0][0], 
-//     //        (*border_input)[0][2][0][1], (*border_input)[0][2][0][2]);
-
-//     entry_border(*border_input, *border_output);
-
-//     float model_output = (*border_output)[0][0];
-//     if (isnan(model_output)) {
-//         debug_print("WARNING: Model output is NaN");
-//         model_output = 0.0f;
-//     } else if (model_output > 1.0f) {
-//         debug_print("WARNING: Model output > 1.0: %.3f", model_output);
-//         model_output = 1.0f;
-//     } else if (model_output < 0.0f) {
-//         debug_print("WARNING: Model output < 0.0: %.3f", model_output);
-//         model_output = 0.0f;
-//     }
-//     output->value = model_output;
-//     debug_print("Model output (inside function): %.6f", output->value);
-//     debug_print("Output pointer address: %p", (void*)output);
-//     debug_print("Output value address: %p", (void*)&(output->value));
-
-//     return true;
-// }
 
 bool run_border_inference(const float* yuv_data, 
     int width,
