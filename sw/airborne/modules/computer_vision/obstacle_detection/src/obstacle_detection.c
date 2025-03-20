@@ -108,11 +108,7 @@ static void* front_processing_thread(void* arg) {
                     240, 240, &model_output);
                 if (inf_success) {
                     // Send ABI message for obstacle detection
-                    AbiSendMsgMODELDATA(ABI_BROADCAST, 
-                        MODEL_TYPE_OBSTACLE,
-                        MODEL_OUTPUT_ROW_SIZE,
-                        MODEL_OUTPUT_COL_SIZE,
-                        (float*)model_output.values  // Cast 2D array to 1D
+ 		AbiSendMsgMODELOUTPUT(38, get_sys_time_usec(), (float*)model_output.values  // Cast 2D array to 1D
                     );
                     if (debug_model) {
                         debug_print("Front model outputs: %.2f, %.2f, %.2f",
@@ -247,12 +243,12 @@ static void* bottom_processing_thread(void* arg) {
                     30, 30, &border_output);
                 if(inf_success) {
                     // Send ABI message for border detection
-                    AbiSendMsgMODELDATA(ABI_BROADCAST,
-                        MODEL_TYPE_BORDER,
-                        1,  // rows
-                        1,  // cols
-                        &border_output.value
-                    );
+                    //AbiSendMsgMODELDATA(ABI_BROADCAST,
+                      //  MODEL_TYPE_BORDER,
+                        //1,  // rows
+                        //1,  // cols
+                        //&border_output.value
+                    //);
                     if (debug_model) {
                         debug_print("Bottom model output: %.2f", border_output.value);
                     }

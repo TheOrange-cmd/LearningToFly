@@ -1,11 +1,14 @@
 #include "obstacle_avoider_avoider.h"
 #include "firmwares/rotorcraft/guidance/guidance_h.h"
 #include "generated/airframe.h"
+#include "generated/flight_plan.h"
 #include "state.h"
 #include "modules/core/abi.h"
 #include <stdio.h>
 #include "std.h" 
 #include <stdlib.h>
+#include <stdarg.h>
+#include "inference.h"  
 
 #ifndef MIN
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
@@ -19,7 +22,7 @@
 #define SATURATE(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
 #endif
 
-#define NUM_REGIONS 5  // We have 5 regions from left to right
+#define NUM_REGIONS 3  // ⚠️ Changed from 5 → 3 danger columns
 #define SMOOTHING_FACTOR 0.3f  // For trend calculation
 
 // Initialize parameters with defaults
@@ -29,21 +32,36 @@ float oag_min_heading_rate = RadOfDeg(20.f);
 float oag_max_heading_rate = RadOfDeg(60.f);
 float obstacle_weight = 1.0f;
 float floor_weight = 1.0f;
-float danger_threshold = 0.8f;
+float danger_threshold = 0.75f;
 uint8_t obstacle_filter_window = 3;  
 uint8_t boundary_filter_window = 1; 
 float oag_smoothing_factor = 0.3f;
 float oag_trend_weight = 1.0f;
+float danger_columns[NUM_REGIONS] = {0, 0, 0};  // ⚠️ Updated for 3 regions
+float obstacle_free_confidence = 0;
+float avoidance_heading_direction = 0;
 
+static struct timeval last_model_update_time;
+static float last_avoidance_heading_direction = 0.0f;
+
+enum navigation_state_t {
+  SAFE,
+  OBSTACLE_FOUND,
+  SEARCH_FOR_SAFE_HEADING,
+  OUT_OF_BOUNDS,
+  REENTER_ARENA
+};
+
+enum navigation_state_t navigation_state = SEARCH_FOR_SAFE_HEADING;  
 
 // Static variables
 static struct filtered_data_t filtered_data = {0};
-static abi_event modeldata_event;
+abi_event ev_model_output;
 static bool initialized = false;
 static bool avoider_enabled = false;
 static float latest_floor_value = 0.0f;
 
-// time logging variables
+// Time logging variables
 static struct timeval start_time;
 static struct timeval current_time;
 
@@ -51,20 +69,16 @@ static struct timeval current_time;
 #define DEBUG_TAG "AVOIDER"
 #define MAX_LOG_LENGTH 256
 
-static void modeldata_handler(uint8_t sender_id, uint8_t output_type, uint8_t rows, uint8_t cols, float* values);
-
 static void debug_print(const char* format, ...) {
     va_list args;
     va_start(args, format);
     
     #ifdef TARGET_AP
-        // On actual drone, use ulogger
         char command[MAX_LOG_LENGTH + 32];
         vsnprintf(command, sizeof(command), format, args);
         snprintf(command, sizeof(command), "ulogger -t %s '%s'", DEBUG_TAG, command);
         system(command);
     #else
-        // In simulation (NPS/Gazebo), use printf
         printf("[%s] ", DEBUG_TAG);
         vprintf(format, args);
         printf("\n");
@@ -74,188 +88,48 @@ static void debug_print(const char* format, ...) {
     va_end(args);
 }
 
-// Filter function
-static float moving_average(float values[], uint8_t window) {
-    float sum = 0;
-    for (uint8_t i = 0; i < window; i++) {
-        sum += values[i];
-    }
-    return sum / window;
-}
+// Callback function for processing model data
+void myModelOutputHandler(uint8_t sender_id, uint32_t stamp, struct model_output_t *output) {
+    debug_print("Received model output from %d at time %u: [%.2f, %.2f, %.2f]", 
+                sender_id, stamp, 
+                output->values[0][0], output->values[0][1], output->values[0][2]);
 
-struct region_danger {
-    float danger_level;
-    float trend;          // Rate of change in danger
-    float previous_danger;
-    float weight;         // Weight for steering calculation (negative for left, positive for right)
-};
+    struct timeval now;
+    gettimeofday(&now, NULL);
 
-static struct region_danger regions[NUM_REGIONS];
+    // Find the highest danger column
+    int max_index = 0;
+    float max_value = output->values[0][0];
 
-void init_region_weights(void) {
-    // Initialize weights from left to right: [-1.0, -0.5, 0.0, 0.5, 1.0]
-    for (int i = 0; i < NUM_REGIONS; i++) {
-        regions[i].weight = -1.0f + (2.0f * i / (NUM_REGIONS - 1));
-    }
-}
-
-float calculate_region_danger(int start_col, int end_col, uint8_t filter_window) {
-    float danger = 0;
-    int count = 0;
-    
-    for (int i = 0; i < filtered_data.rows; i++) {
-        for (int j = start_col; j < end_col; j++) {
-            for (int k = 0; k < filter_window; k++) {
-                int idx = (filtered_data.current_index - k + FILTER_BUFFER_SIZE) % FILTER_BUFFER_SIZE;
-                danger += filtered_data.obstacle_values[i][idx][j];
-                count++;
-            }
+    for (int i = 1; i < NUM_REGIONS; i++) {  
+        if (output->values[0][i] > max_value) {
+            max_value = output->values[0][i];
+            max_index = i;
         }
     }
-    
-    return (count > 0) ? danger / count : 0;
-}
+    output->values[0][2] *= 1.3; 
 
-float calculate_steering_command(float *speed_sp, float *heading_rate_sp) {
-    // Check if we're near testing area boundary first - with shorter filter
-    float boundary_danger = latest_floor_value;
+    float new_avoidance_heading_direction = 0.0f;  // Default: Move forward
 
-    // If we're near boundary, override normal obstacle avoidance
-    if (boundary_danger > danger_threshold) {
-        *heading_rate_sp = oag_max_heading_rate;
-        *speed_sp = oag_min_speed;
-        debug_print("BOUNDARY DETECTED: %.2f - Turning around", boundary_danger);
-        return boundary_danger;
-    }
-
-    // Normal obstacle avoidance when within testing area
-    int cols_per_region = filtered_data.cols / NUM_REGIONS;
-    float weighted_danger_sum = 0;
-    float total_danger = 0;
-    float max_danger = 0;
-    
-    // Calculate dangers and trends for each region - with original filter window
-    for (int r = 0; r < NUM_REGIONS; r++) {
-        int start_col = r * cols_per_region;
-        int end_col = (r == NUM_REGIONS-1) ? filtered_data.cols : (r + 1) * cols_per_region;
-        
-        regions[r].previous_danger = regions[r].danger_level;
-        regions[r].danger_level = calculate_region_danger(start_col, end_col, obstacle_filter_window) * obstacle_weight;
-        
-        regions[r].trend = oag_smoothing_factor * (regions[r].danger_level - regions[r].previous_danger) + 
-                          (1 - oag_smoothing_factor) * regions[r].trend;
-        
-        float effective_danger = regions[r].danger_level + (regions[r].trend * oag_trend_weight);
-        
-        weighted_danger_sum += effective_danger * regions[r].weight;
-        total_danger += effective_danger;
-        max_danger = MAX(max_danger, effective_danger);
-    }
-
-    // Calculate steering direction for obstacle avoidance
-    float steering_direction = 0;
-    if (total_danger > 0) {
-        steering_direction = weighted_danger_sum / total_danger;
-    }
-
-    // Calculate heading rate based on obstacle danger
-    float danger_scale = (max_danger > danger_threshold) ? 
-        (max_danger - danger_threshold) / (1.0f - danger_threshold) : 
-        (max_danger / danger_threshold);
-    
-    float base_rate = oag_min_heading_rate + 
-        (oag_max_heading_rate - oag_min_heading_rate) * danger_scale;
-    
-    *heading_rate_sp = base_rate * steering_direction;
-
-    // Calculate speed
-    *speed_sp = oag_max_speed;
-    if (max_danger > 0) {
-        float center_trend = regions[NUM_REGIONS/2].trend;
-        float speed_reduction = danger_scale + MAX(0, center_trend * oag_trend_weight);
-        speed_reduction = SATURATE(speed_reduction, 0, 1);
-        
-        *speed_sp = oag_max_speed * (1.0f - speed_reduction);
-        *speed_sp = MAX(*speed_sp, oag_min_speed);
-    }
-
-    debug_print("Boundary:%.2f Obstacles:%.2f %.2f %.2f %.2f %.2f Dir:%.2f Spd:%.2f Rate:%.2f", 
-                boundary_danger,
-                regions[0].danger_level, 
-                regions[1].danger_level,
-                regions[2].danger_level,
-                regions[3].danger_level,
-                regions[4].danger_level,
-                steering_direction,
-                *speed_sp, 
-                *heading_rate_sp);
-
-    return max_danger;
-}
-
-// Callback function for model data
-void modeldata_handler(uint8_t sender_id, uint8_t output_type, uint8_t rows, uint8_t cols, float* values) {
-    if (!initialized) return;
-
-    if (filtered_data.frames_processed % 100 == 0) {
-        // get current time
-        gettimeofday(&current_time, NULL);
-        float time_diff = (current_time.tv_sec - start_time.tv_sec) + (current_time.tv_usec - start_time.tv_usec) / 1000000.0f;
-        debug_print("Obstacle data received: %d messages received. Messages per second: %.2f", 
-            filtered_data.frames_processed, filtered_data.frames_processed / time_diff);
-    }
-
-    if (output_type == MODEL_TYPE_OBSTACLE) {
-        // printf("[Avoider] Obstacle data received\n");
-        // Reallocate filtered data if dimensions change
-        if (filtered_data.rows != rows || filtered_data.cols != cols) {
-            debug_print("Updating grid dimensions from %dx%d to %dx%d", 
-                       filtered_data.rows, filtered_data.cols, rows, cols);
-
-            // Free existing arrays if they exist
-            if (filtered_data.obstacle_values[0][0] != NULL) {
-                for (int i = 0; i < filtered_data.rows; i++) {
-                    for (int j = 0; j < FILTER_BUFFER_SIZE; j++) {
-                        free(filtered_data.obstacle_values[i][j]);
-                    }
-                }
-            }
-            
-            // Update dimensions
-            filtered_data.rows = rows;
-            filtered_data.cols = cols;
-            
-            // Allocate new arrays
-            for (int i = 0; i < rows; i++) {
-                for (int j = 0; j < FILTER_BUFFER_SIZE; j++) {
-                    filtered_data.obstacle_values[i][j] = calloc(cols, sizeof(float));
-                    if (filtered_data.obstacle_values[i][j] == NULL) {
-                        debug_print("Failed to allocate memory for obstacle values");
-                        return;
-                    }
-                }
-            }
-        }
-        
-        // Update values in current slot
-        uint8_t idx = filtered_data.current_index;
-        for (int i = 0; i < rows; i++) {
-            for (int j = 0; j < cols; j++) {
-                filtered_data.obstacle_values[i][idx][j] = values[i * cols + j];
-            }
+    // Control movement based on the highest danger value
+    if (max_value > danger_threshold) {
+        if (max_index == 0) {
+            debug_print("⚠️ Danger on LEFT → Steering RIGHT");
+            new_avoidance_heading_direction = oag_max_heading_rate / 2;
+        } else if (max_index == 1) {
+            debug_print("⚠️ Danger CENTER → Slowing Down & Turning");
+            new_avoidance_heading_direction = oag_max_heading_rate / 2;
+        } else {
+            debug_print("⚠️ Danger on RIGHT → Steering LEFT");
+            new_avoidance_heading_direction = -oag_max_heading_rate / 2;
         }
     }
-    else if (output_type == MODEL_TYPE_BORDER) {
-        debug_print("Raw border value received: %.6f", values[0]);
-        latest_floor_value = values[0] * floor_weight;
-        debug_print("Weighted border value: %.6f", latest_floor_value);
-    }
-    
-    // Update counters
-    filtered_data.frames_processed++;
-    filtered_data.current_index = (filtered_data.current_index + 1) % FILTER_BUFFER_SIZE;
-}
 
+    // Store the latest avoidance direction and update timestamp
+    avoidance_heading_direction = new_avoidance_heading_direction;
+    last_avoidance_heading_direction = new_avoidance_heading_direction;
+    last_model_update_time = now;
+}
 void obstacle_avoider_init(void) {
     // Initialize structure
     filtered_data.current_index = 0;
@@ -263,57 +137,85 @@ void obstacle_avoider_init(void) {
     filtered_data.cols = 0;
     filtered_data.frames_processed = 0;
 
+    // Initialize ABI message handling
+    AbiBindMsgMODELOUTPUT(38, &ev_model_output, myModelOutputHandler);
 
-
-    // Clear floor values
-    for (int i = 0; i < FILTER_BUFFER_SIZE; i++) {
-        filtered_data.floor_value[i] = 0;
-    }
-
-    // Initialize obstacle values to NULL
-    for (int i = 0; i < MAX_OBSTACLE_DIMS; i++) {
-        for (int j = 0; j < FILTER_BUFFER_SIZE; j++) {
-            filtered_data.obstacle_values[i][j] = NULL;
-        }
-    }
-    
-    // Register ABI listener
-    AbiBindMsgMODELDATA(ABI_BROADCAST, &modeldata_event, modeldata_handler);
-    
     initialized = true;
-    debug_print("Avoider initialized");
-    // get start time
+    debug_print("✅ Avoider initialized");
     gettimeofday(&start_time, NULL);
-
 }
 
 void start_avoider(void) {
     avoider_enabled = true;
     guidance_h_mode_changed(GUIDANCE_H_MODE_GUIDED);
-    debug_print("Avoider enabled - start flying!");
+    debug_print("🚀 Avoider enabled - Start flying!");
 }
 
 void obstacle_avoider_cleanup(void) {
-    // Free allocated memory
-    if (filtered_data.obstacle_values[0][0] != NULL) {
-        for (int i = 0; i < filtered_data.rows; i++) {
-            for (int j = 0; j < FILTER_BUFFER_SIZE; j++) {
-                free(filtered_data.obstacle_values[i][j]);
-            }
-        }
-    }
     initialized = false;
     avoider_enabled = false;
 }
 
 void obstacle_avoider_periodic(void) {
-    if (!avoider_enabled) {
+    if (guidance_h.mode != GUIDANCE_H_MODE_GUIDED) {
+        navigation_state = SEARCH_FOR_SAFE_HEADING;
         return;
     }
+
+    struct timeval now;
+    gettimeofday(&now, NULL);
     
-    float speed_sp, heading_rate;
-    calculate_steering_command(&speed_sp, &heading_rate);
-    
-    guidance_h_set_body_vel(speed_sp, 0);
-    guidance_h_set_heading_rate(heading_rate);
+    float elapsed_time = (now.tv_sec - last_model_update_time.tv_sec) + 
+                         (now.tv_usec - last_model_update_time.tv_usec) / 1000000.0f;
+
+    // If no new model updates in 1 second, gradually return to forward motion
+    if (elapsed_time > 1.0) {
+        avoidance_heading_direction *= 0.5f; // Gradual decay
+        if (fabs(avoidance_heading_direction) < 0.01f) {
+            avoidance_heading_direction = 0.0f; // Reset to straight movement
+        }
+    }
+
+    float speed_sp = oag_max_speed;
+
+    switch (navigation_state) {
+        case SAFE:
+            if (!InsideObstacleZone(stateGetPositionEnu_f()->x + 0.4 * sinf(stateGetNedToBodyEulers_f()->psi), 
+                                    stateGetPositionEnu_f()->y + 0.4 * cosf(stateGetNedToBodyEulers_f()->psi))) {
+                navigation_state = OUT_OF_BOUNDS;
+            } else {
+                guidance_h_set_body_vel(speed_sp, 0);
+            }
+            guidance_h_set_heading_rate(avoidance_heading_direction);
+            break;
+
+	case SEARCH_FOR_SAFE_HEADING:
+		navigation_state = SAFE;
+    break;
+
+        case OUT_OF_BOUNDS:
+            guidance_h_set_body_vel(0, 0);
+            guidance_h_set_heading_rate(RadOfDeg(60.f));
+            navigation_state = REENTER_ARENA;
+            debug_print("🔄 Re-entering arena...");
+            break;
+
+case REENTER_ARENA:
+    if (InsideObstacleZone(stateGetPositionEnu_f()->x + 1 * sinf(stateGetNedToBodyEulers_f()->psi), 
+                           stateGetPositionEnu_f()->y + 1 * cosf(stateGetNedToBodyEulers_f()->psi))) {
+        obstacle_free_confidence += 1;  // Increment confidence
+    } else {
+        obstacle_free_confidence = 0;   // Reset if still outside
+    }
+
+    if (obstacle_free_confidence > 5) { // Require multiple confirmations before switching to SAFE
+        guidance_h_set_heading(stateGetNedToBodyEulers_f()->psi);
+        obstacle_free_confidence = 0;
+        navigation_state = SAFE;
+    }
+    break;
+
+        default:
+            break;
+    }
 }
