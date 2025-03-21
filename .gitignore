@@ -233,3 +233,4 @@ tests/results/*
 /FrontCamDetector/dataset
 /FrontCamDetector/dataset_uyvy
 /FrontCamDetector/front_images
+/BottomCamDetector/benchmark_logs
