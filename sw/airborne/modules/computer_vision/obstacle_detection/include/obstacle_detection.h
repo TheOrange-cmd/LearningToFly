@@ -30,8 +30,8 @@ struct obstacle_detection_t {
 
 // Shared data for each camera
 struct camera_processing_t {
-    float* rgb_buffer;
-    size_t rgb_buffer_size;
+    float* yuv_buffer;
+    size_t yuv_buffer_size;
     pthread_mutex_t processing_mutex;
 };
 

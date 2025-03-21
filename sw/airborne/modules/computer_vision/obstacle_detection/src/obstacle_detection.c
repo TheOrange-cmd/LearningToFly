@@ -98,13 +98,13 @@ static void* front_processing_thread(void* arg) {
             bool conv_success = convert_uyvy_to_yuv_crop(img->buf, 
                 img->w, img->h,
                 240, 240,
-                front_camera_data.processing.rgb_buffer,
-                front_camera_data.processing.rgb_buffer_size);
+                front_camera_data.processing.yuv_buffer,
+                front_camera_data.processing.yuv_buffer_size);
 
             if (conv_success) {
                 struct model_output_t model_output;
                 bool inf_success = run_obstacle_inference(
-                    front_camera_data.processing.rgb_buffer,
+                    front_camera_data.processing.yuv_buffer,
                     240, 240, &model_output);
                 if (inf_success) {
                     // Send ABI message for obstacle detection
@@ -253,8 +253,8 @@ static void* bottom_processing_thread(void* arg) {
             }
 
             bool conv_success = convert_uyvy_to_yuv_downscale(img->buf, img->w, img->h,
-                                bottom_camera_data.processing.rgb_buffer,
-                                bottom_camera_data.processing.rgb_buffer_size, 8);
+                                bottom_camera_data.processing.yuv_buffer,
+                                bottom_camera_data.processing.yuv_buffer_size, 8);
             if (debug) {
                 gettimeofday(&t2, NULL);
             }
@@ -262,7 +262,7 @@ static void* bottom_processing_thread(void* arg) {
             if (conv_success) {
                 struct border_output_t border_output;
                 bool inf_success = run_border_inference(
-                    bottom_camera_data.processing.rgb_buffer,
+                    bottom_camera_data.processing.yuv_buffer,
                     30, 30, &border_output);
                 if(inf_success) {
                     // Send ABI message for border detection
@@ -321,24 +321,24 @@ bool obstacle_detection_init(void) {
     }
 
     // Allocate RGB buffers
-    // front_camera_data.processing.rgb_buffer_size = (size_t)FRONT_CAMERA_WIDTH * FRONT_CAMERA_HEIGHT * 3 * sizeof(float);
-    front_camera_data.processing.rgb_buffer_size = (size_t)240 * 240 * 3 * sizeof(float);
+    // front_camera_data.processing.yuv_buffer_size = (size_t)FRONT_CAMERA_WIDTH * FRONT_CAMERA_HEIGHT * 3 * sizeof(float);
+    front_camera_data.processing.yuv_buffer_size = (size_t)240 * 240 * 3 * sizeof(float);
     size_t bottom_size = (size_t)30 * 30 * 3 * sizeof(float);
     debug_print("Allocating bottom camera RGB buffer: %dx%d = %zu bytes", 
         30, 30, bottom_size);
     debug_print("Allocating front camera RGB buffer: %dx%d = %zu bytes", 
-        FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT, front_camera_data.processing.rgb_buffer_size);
+        FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT, front_camera_data.processing.yuv_buffer_size);
     
-    front_camera_data.processing.rgb_buffer = malloc(front_camera_data.processing.rgb_buffer_size);
-    bottom_camera_data.processing.rgb_buffer_size = bottom_size;
-    bottom_camera_data.processing.rgb_buffer = malloc(bottom_size);
+    front_camera_data.processing.yuv_buffer = malloc(front_camera_data.processing.yuv_buffer_size);
+    bottom_camera_data.processing.yuv_buffer_size = bottom_size;
+    bottom_camera_data.processing.yuv_buffer = malloc(bottom_size);
 
-    if (!bottom_camera_data.processing.rgb_buffer) {
+    if (!bottom_camera_data.processing.yuv_buffer) {
         debug_print("Failed to allocate bottom camera RGB buffer (%zu bytes)", bottom_size);
         return false;
     }
     
-    if (!front_camera_data.processing.rgb_buffer) {
+    if (!front_camera_data.processing.yuv_buffer) {
         debug_print("Failed to allocate front camera RGB buffers");
         cleanup_inference();
         return false;
@@ -432,10 +432,10 @@ void obstacle_detection_cleanup(void) {
     pthread_join(obstacle_detection.bottom_processor.thread_id, NULL);
 
     // Free RGB buffers
-    free(front_camera_data.processing.rgb_buffer);
-    free(bottom_camera_data.processing.rgb_buffer);
-    front_camera_data.processing.rgb_buffer = NULL;
-    bottom_camera_data.processing.rgb_buffer = NULL;
+    free(front_camera_data.processing.yuv_buffer);
+    free(bottom_camera_data.processing.yuv_buffer);
+    front_camera_data.processing.yuv_buffer = NULL;
+    bottom_camera_data.processing.yuv_buffer = NULL;
 
     // Cleanup front camera resources
     if (front_camera_data.streaming.frame != NULL) {
