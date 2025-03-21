@@ -6,6 +6,10 @@
 #include "debug_print.h"
 DEFINE_DEBUG_PRINT("IMG_CONVERT")
 
+// This file contains several functions to convert uyvy image data to some desired yuv format.
+// The functions are not parameterized on purpose to allow for maximum speed. 
+
+// Convert UYVY image data to YUV format, cropping to a specific region - specialized for the front camera
 bool convert_uyvy_to_yuv_crop(const uint8_t* uyvy_data,
     int orig_width,
     int orig_height,
@@ -67,6 +71,7 @@ bool convert_uyvy_to_yuv_crop(const uint8_t* uyvy_data,
     return true;
 }
 
+// Convert UYVY image data to YUV format without cropping or downscaling
 bool convert_uyvy_to_yuv(const uint8_t* uyvy_data,
     int width,
     int height,
@@ -112,7 +117,7 @@ bool convert_uyvy_to_yuv(const uint8_t* uyvy_data,
     return true;
 }
 
-// Highly optimized version for 2x downscaling
+// following are three functions that downscale the image by a factor of 2, 4, or 8
 bool convert_uyvy_to_yuv_downscale2(const uint8_t* uyvy_data,
     int width,
     int height,
@@ -346,7 +351,7 @@ bool convert_uyvy_to_yuv_downscale8(const uint8_t* uyvy_data,
    return true;
 }
 
-// Wrapper function that calls the appropriate specialized function
+// Wrapper function that calls the appropriate conversion with downscaling (or not)
 bool convert_uyvy_to_yuv_downscale(const uint8_t* uyvy_data,
     int width,
     int height,

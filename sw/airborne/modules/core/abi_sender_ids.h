@@ -644,5 +644,15 @@
 #define LIDAR_DATA_VL53L5CX_ID 1
 #endif
 
+/*
+ * IDs of CNN output senders
+*/
+#ifndef OBST_DET_ID
+#define OBST_DET_ID 1
+#endif
+#ifndef BOUND_DET_ID
+#define BOUND_DET_ID 2  
+#endif
+
 
 #endif /* ABI_SENDER_IDS_H */

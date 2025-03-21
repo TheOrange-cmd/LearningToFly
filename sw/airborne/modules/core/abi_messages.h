@@ -98,8 +98,7 @@ typedef void (*abi_callbackIMU_GYRO_INT)(uint8_t sender_id, uint32_t stamp, stru
 typedef void (*abi_callbackIMU_ACCEL_INT)(uint8_t sender_id, uint32_t stamp, struct FloatVect3 * delta_accel, uint16_t dt);
 typedef void (*abi_callbackVEL_SP)(uint8_t sender_id, struct FloatVect3 * vel_sp);
 typedef void (*abi_callbackLIDAR_DATA)(uint8_t sender_id, uint32_t stamp, uint32_t numRows, uint32_t numCols, uint16_t size, uint8_t subtype, uint8_t* data);
-typedef void (*abi_callbackMODELOUTPUT)(uint8_t sender_id, uint32_t stamp, struct model_output_t *output);
-
+typedef void (*abi_callbackMODELOUTPUT)(uint8_t sender_id, uint32_t stamp, unified_model_output_t *output);
 
 /* Bind and Send functions */
 
@@ -137,21 +136,38 @@ static inline void AbiSendMsgBARO_DIFF(uint8_t sender_id, float pressure) {
   }
 }
 
-static inline void AbiSendMsgMODELOUTPUT(uint8_t sender_id, uint32_t stamp, struct model_output_t *output) {
-    abi_event* e;
-    ABI_FOREACH(abi_queues[ABI_MODELOUTPUT_ID], e) {
-        if (e->id == ABI_BROADCAST || e->id == sender_id) {
-            abi_callbackMODELOUTPUT cb = (abi_callbackMODELOUTPUT)(e->cb);
-            cb(sender_id, stamp, output);
-        }
-    }
+// static inline void AbiSendMsgMODELOUTPUT(uint8_t sender_id, uint32_t stamp, struct model_output_t *output) {
+//     abi_event* e;
+//     ABI_FOREACH(abi_queues[ABI_MODELOUTPUT_ID], e) {
+//         if (e->id == ABI_BROADCAST || e->id == sender_id) {
+//             abi_callbackMODELOUTPUT cb = (abi_callbackMODELOUTPUT)(e->cb);
+//             cb(sender_id, stamp, output);
+//         }
+//     }
+// }
+
+// static inline void AbiBindMsgMODELOUTPUT(uint8_t sender_id, abi_event * ev, abi_callbackMODELOUTPUT cb) {
+//     if (abi_queues[ABI_MODELOUTPUT_ID] == ev) return;
+//     ev->id = sender_id;
+//     ev->cb = (abi_callback)cb;
+//     ABI_PREPEND(abi_queues[ABI_MODELOUTPUT_ID], ev);
+// }
+
+static inline void AbiSendMsgMODELOUTPUT(uint8_t sender_id, uint32_t stamp, unified_model_output_t *output) {
+  abi_event* e;
+  ABI_FOREACH(abi_queues[ABI_MODELOUTPUT_ID], e) {
+      if (e->id == ABI_BROADCAST || e->id == sender_id) {
+          abi_callbackMODELOUTPUT cb = (abi_callbackMODELOUTPUT)(e->cb);
+          cb(sender_id, stamp, output);
+      }
+  }
 }
 
 static inline void AbiBindMsgMODELOUTPUT(uint8_t sender_id, abi_event * ev, abi_callbackMODELOUTPUT cb) {
-    if (abi_queues[ABI_MODELOUTPUT_ID] == ev) return;
-    ev->id = sender_id;
-    ev->cb = (abi_callback)cb;
-    ABI_PREPEND(abi_queues[ABI_MODELOUTPUT_ID], ev);
+  if (abi_queues[ABI_MODELOUTPUT_ID] == ev) return;
+  ev->id = sender_id;
+  ev->cb = (abi_callback)cb;
+  ABI_PREPEND(abi_queues[ABI_MODELOUTPUT_ID], ev);
 }
 
 

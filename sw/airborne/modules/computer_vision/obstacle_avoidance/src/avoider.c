@@ -26,7 +26,7 @@
 #define SMOOTHING_FACTOR 0.3f  // For trend calculation
 
 // Initialize parameters with defaults
-float oag_max_speed = 0.5f;
+float oag_max_speed = 0.3f;
 float oag_min_speed = 0.1f;
 float oag_min_heading_rate = RadOfDeg(20.f);
 float oag_max_heading_rate = RadOfDeg(60.f);
@@ -40,6 +40,8 @@ float oag_trend_weight = 1.0f;
 float danger_columns[NUM_REGIONS] = {0, 0, 0};  // ⚠️ Updated for 3 regions
 float obstacle_free_confidence = 0;
 float avoidance_heading_direction = 0;
+bool use_border_detection = true;
+float border_threshold = 0.5f;
 
 static struct timeval last_model_update_time;
 static float last_avoidance_heading_direction = 0.0f;
@@ -57,7 +59,6 @@ enum navigation_state_t navigation_state = SEARCH_FOR_SAFE_HEADING;
 // Static variables
 static struct filtered_data_t filtered_data = {0};
 abi_event ev_model_output;
-static bool initialized = false;
 static bool avoider_enabled = false;
 static float latest_floor_value = 0.0f;
 
@@ -89,47 +90,67 @@ static void debug_print(const char* format, ...) {
 }
 
 // Callback function for processing model data
-void myModelOutputHandler(uint8_t sender_id, uint32_t stamp, struct model_output_t *output) {
-    debug_print("Received model output from %d at time %u: [%.2f, %.2f, %.2f]", 
-                sender_id, stamp, 
-                output->values[0][0], output->values[0][1], output->values[0][2]);
-
+void myModelOutputHandler(uint8_t sender_id, uint32_t stamp, unified_model_output_t *output) {
     struct timeval now;
     gettimeofday(&now, NULL);
+    // debug_print("Received model output from %d at time %u", sender_id, stamp);
+    // Handle different model types
+    if (output->type == 0) {  // Obstacle detection model
+        // debug_print("Received obstacle output from %d at time %u: [%.2f, %.2f, %.2f]", 
+        //             sender_id, stamp, 
+        //             output->data.obstacle.values[0][0], 
+        //             output->data.obstacle.values[0][1], 
+        //             output->data.obstacle.values[0][2]);
 
-    // Find the highest danger column
-    int max_index = 0;
-    float max_value = output->values[0][0];
+        // Find the highest danger column
+        int max_index = 0;
+        float max_value = output->data.obstacle.values[0][0];
 
-    for (int i = 1; i < NUM_REGIONS; i++) {  
-        if (output->values[0][i] > max_value) {
-            max_value = output->values[0][i];
-            max_index = i;
+        for (int i = 1; i < NUM_REGIONS; i++) {  
+            if (output->data.obstacle.values[0][i] > max_value) {
+                max_value = output->data.obstacle.values[0][i];
+                max_index = i;
+            }
+        }
+        output->data.obstacle.values[0][2] *= 1.3; 
+
+        float new_avoidance_heading_direction = 0.0f;  // Default: Move forward
+
+        // Control movement based on the highest danger value
+        if (max_value > danger_threshold) {
+            if (max_index == 0) {
+                debug_print("⚠️ Danger on LEFT → Steering RIGHT");
+                new_avoidance_heading_direction = oag_max_heading_rate / 2;
+            } else if (max_index == 1) {
+                debug_print("⚠️ Danger CENTER → Slowing Down & Turning");
+                new_avoidance_heading_direction = oag_max_heading_rate / 2;
+            } else {
+                debug_print("⚠️ Danger on RIGHT → Steering LEFT");
+                new_avoidance_heading_direction = -oag_max_heading_rate / 2;
+            }
+        }
+
+        // Store the latest avoidance direction and update timestamp
+        avoidance_heading_direction = new_avoidance_heading_direction;
+        last_avoidance_heading_direction = new_avoidance_heading_direction;
+        last_model_update_time = now;
+    }
+    else if (output->type == 1) {  // Border detection model
+        debug_print("Received border output from %d at time %u: [%.2f]", 
+                    sender_id, stamp, output->data.border.value);
+                    
+        // Handle border detection logic
+        if (use_border_detection) {
+            
+            if (output->data.border.value > border_threshold) {
+                debug_print("⚠️ Border detected - Initiating turnaround");
+                navigation_state = OUT_OF_BOUNDS;
+                guidance_h_set_body_vel(-oag_max_speed, 0);
+            }
         }
     }
-    output->values[0][2] *= 1.3; 
-
-    float new_avoidance_heading_direction = 0.0f;  // Default: Move forward
-
-    // Control movement based on the highest danger value
-    if (max_value > danger_threshold) {
-        if (max_index == 0) {
-            debug_print("⚠️ Danger on LEFT → Steering RIGHT");
-            new_avoidance_heading_direction = oag_max_heading_rate / 2;
-        } else if (max_index == 1) {
-            debug_print("⚠️ Danger CENTER → Slowing Down & Turning");
-            new_avoidance_heading_direction = oag_max_heading_rate / 2;
-        } else {
-            debug_print("⚠️ Danger on RIGHT → Steering LEFT");
-            new_avoidance_heading_direction = -oag_max_heading_rate / 2;
-        }
-    }
-
-    // Store the latest avoidance direction and update timestamp
-    avoidance_heading_direction = new_avoidance_heading_direction;
-    last_avoidance_heading_direction = new_avoidance_heading_direction;
-    last_model_update_time = now;
 }
+
 void obstacle_avoider_init(void) {
     // Initialize structure
     filtered_data.current_index = 0;
@@ -137,10 +158,9 @@ void obstacle_avoider_init(void) {
     filtered_data.cols = 0;
     filtered_data.frames_processed = 0;
 
-    // Initialize ABI message handling
-    AbiBindMsgMODELOUTPUT(38, &ev_model_output, myModelOutputHandler);
+    // Initialize ABI message handling - bind to both sender types
+    AbiBindMsgMODELOUTPUT(ABI_BROADCAST, &ev_model_output, myModelOutputHandler);
 
-    initialized = true;
     debug_print("✅ Avoider initialized");
     gettimeofday(&start_time, NULL);
 }
@@ -151,12 +171,26 @@ void start_avoider(void) {
     debug_print("🚀 Avoider enabled - Start flying!");
 }
 
-void obstacle_avoider_cleanup(void) {
-    initialized = false;
+void stop_avoider(void) {
     avoider_enabled = false;
+    // Reset state variables
+    navigation_state = SEARCH_FOR_SAFE_HEADING;
+    obstacle_free_confidence = 0;
+    avoidance_heading_direction = 0;
+    last_avoidance_heading_direction = 0.0f;
+    
+    // Reset filtered data
+    filtered_data.current_index = 0;
+    filtered_data.frames_processed = 0;
+    
+    // Log the cleanup
+    debug_print("🛑 Avoider stopped and reset");
 }
 
 void obstacle_avoider_periodic(void) {
+    if (!avoider_enabled) {
+        return;
+    }
     if (guidance_h.mode != GUIDANCE_H_MODE_GUIDED) {
         navigation_state = SEARCH_FOR_SAFE_HEADING;
         return;
@@ -180,18 +214,25 @@ void obstacle_avoider_periodic(void) {
 
     switch (navigation_state) {
         case SAFE:
-            if (!InsideObstacleZone(stateGetPositionEnu_f()->x + 0.4 * sinf(stateGetNedToBodyEulers_f()->psi), 
-                                    stateGetPositionEnu_f()->y + 0.4 * cosf(stateGetNedToBodyEulers_f()->psi))) {
-                navigation_state = OUT_OF_BOUNDS;
+            if (!use_border_detection) {
+                if (!InsideObstacleZone(stateGetPositionEnu_f()->x + 0.4 * sinf(stateGetNedToBodyEulers_f()->psi), 
+                    stateGetPositionEnu_f()->y + 0.4 * cosf(stateGetNedToBodyEulers_f()->psi))) {
+                    navigation_state = OUT_OF_BOUNDS;
+                } else {
+                    guidance_h_set_body_vel(speed_sp, 0);
+                }
+                    guidance_h_set_heading_rate(avoidance_heading_direction);
+                break;
             } else {
                 guidance_h_set_body_vel(speed_sp, 0);
+                guidance_h_set_heading_rate(avoidance_heading_direction);
+                break;
             }
-            guidance_h_set_heading_rate(avoidance_heading_direction);
-            break;
 
-	case SEARCH_FOR_SAFE_HEADING:
-		navigation_state = SAFE;
-    break;
+
+        case SEARCH_FOR_SAFE_HEADING:
+            navigation_state = SAFE;
+            break;
 
         case OUT_OF_BOUNDS:
             guidance_h_set_body_vel(0, 0);
@@ -200,20 +241,20 @@ void obstacle_avoider_periodic(void) {
             debug_print("🔄 Re-entering arena...");
             break;
 
-case REENTER_ARENA:
-    if (InsideObstacleZone(stateGetPositionEnu_f()->x + 1 * sinf(stateGetNedToBodyEulers_f()->psi), 
-                           stateGetPositionEnu_f()->y + 1 * cosf(stateGetNedToBodyEulers_f()->psi))) {
-        obstacle_free_confidence += 1;  // Increment confidence
-    } else {
-        obstacle_free_confidence = 0;   // Reset if still outside
-    }
+        case REENTER_ARENA:
+            if (InsideObstacleZone(stateGetPositionEnu_f()->x + 1 * sinf(stateGetNedToBodyEulers_f()->psi), 
+                                stateGetPositionEnu_f()->y + 1 * cosf(stateGetNedToBodyEulers_f()->psi))) {
+                obstacle_free_confidence += 1;  // Increment confidence
+            } else {
+                obstacle_free_confidence = 0;   // Reset if still outside
+            }
 
-    if (obstacle_free_confidence > 5) { // Require multiple confirmations before switching to SAFE
-        guidance_h_set_heading(stateGetNedToBodyEulers_f()->psi);
-        obstacle_free_confidence = 0;
-        navigation_state = SAFE;
-    }
-    break;
+            if (obstacle_free_confidence > 5) { // Require multiple confirmations before switching to SAFE
+                guidance_h_set_heading(stateGetNedToBodyEulers_f()->psi);
+                obstacle_free_confidence = 0;
+                navigation_state = SAFE;
+            }
+            break;
 
         default:
             break;

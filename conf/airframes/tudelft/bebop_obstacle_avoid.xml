@@ -15,7 +15,7 @@
       <module name="fdm" type="gazebo"/>
       <define name="VIDEO_CAPTURE_PATH" value="/tmp/paparazzi/images"/>
       <define name="LOGGER_FILE_PATH" value="/tmp/paparazzi/log"/>
-      <define name="BYPASS_REAL_SENSOR" value="TRUE"/>
+      <!-- <define name="BYPASS_REAL_SENSOR" value="TRUE"/> -->
     </target>
 
     <!-- Subsystem section -->
@@ -61,8 +61,8 @@
     
     <!-- Video streaming -->
     <module name="video_rtp_stream">
-      <define name="VIEWVIDEO_CAMERA" value="front_camera"/>
-      <define name="VIEWVIDEO_CAMERA2" value="bottom_camera"/>
+      <define name="VIEWVIDEO_CAMERA" value="bottom_camera"/>
+      <define name="VIEWVIDEO_CAMERA2" value="front_camera"/>
       <define name="VIEWVIDEO_DOWNSIZE_FACTOR" value="1"/>
       <define name="VIEWVIDEO_QUALITY_FACTOR" value="40"/>
     </module>
@@ -104,7 +104,7 @@
 
   <!-- Defaults for avoider -->
   <section name="OBSTACLE_AVOIDER" prefix="OAG_">
-      <define name="MAX_SPEED" value="0.5"/>
+      <define name="MAX_SPEED" value="0.2"/>
       <define name="MIN_HEADING_RATE" value="10" unit="deg/s"/>
       <define name="MAX_HEADING_RATE" value="60" unit="deg/s"/>
       <define name="OBSTACLE_WEIGHT" value="1.0"/>
@@ -112,6 +112,7 @@
       <define name="FILTER_WINDOW" value="5"/>
       <define name="DANGER_THRESHOLD" value="0.8"/>
       <define name="MIN_SPEED" value="0.1"/>
+      <define name="BORDER_THRESHOLD" value="0.5"/>
   </section>
 
   <section name="MIXING" prefix="MOTOR_MIXING_">
@@ -128,14 +129,6 @@
     <set servo="BOTTOM_RIGHT" value="motor_mixing.commands[MOTOR_BACK_RIGHT]"/>
     <set servo="BOTTOM_LEFT" value="motor_mixing.commands[MOTOR_BACK_LEFT]"/>
   </command_laws>
-
-
-
-<!-- Gazebo cam -->
-  <section name="GAZEBO_CAM" prefix="GAZEBO_CAM_">
-    <define name="FRONT_CAMERA_NAME" value="front_camera"/>
-    <define name="FRONT_CAMERA_ROOT" value="cyberzoo/bebop"/>
-  </section>
 
   <section name="AIR_DATA" prefix="AIR_DATA_">
     <define name="CALC_AIRSPEED" value="FALSE"/>

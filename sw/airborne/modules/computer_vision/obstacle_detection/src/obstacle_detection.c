@@ -61,29 +61,12 @@ struct obstacle_detection_t obstacle_detection = {
 
 // bool for debug prints
 static bool debug = false;
-static bool debug_model = true;
-
-static uint32_t front_frames_received = 0;
-static uint32_t front_frames_processed = 0;
-static uint32_t bottom_frames_received = 0;
-static uint32_t bottom_frames_processed = 0;
+static bool debug_model = false;
 
 struct camera_data_t front_camera_data = {0};
 struct camera_data_t bottom_camera_data = {0};
 static struct video_listener* front_video_listener = NULL;
 static struct video_listener* bottom_video_listener = NULL;
-
-static void update_fps(struct timeval *last_time, float *fps) {
-    struct timeval now;
-    gettimeofday(&now, NULL);
-    
-    if (last_time->tv_sec != 0) {
-        float dt = ((now.tv_sec - last_time->tv_sec) * 1000000.0f + 
-                   (now.tv_usec - last_time->tv_usec)) / 1000000.0f;
-        *fps = 0.95f * *fps + 0.05f * (1.0f / dt);
-    }
-    *last_time = now;
-}
 
 // Processing thread functions
 static void* front_processing_thread(void* arg) {
@@ -107,13 +90,24 @@ static void* front_processing_thread(void* arg) {
                     front_camera_data.processing.yuv_buffer,
                     240, 240, &model_output);
                 if (inf_success) {
-                    // Send ABI message for obstacle detection
- 		AbiSendMsgMODELOUTPUT(38, get_sys_time_usec(), (float*)model_output.values  // Cast 2D array to 1D
-                    );
+                    unified_model_output_t unified_output;
+                    unified_output.type = 0; // 0 for obstacle detection
+                    
+                    // Copy values
+                    for (int i = 0; i < MODEL_OUTPUT_ROW_SIZE; i++) {
+                        for (int j = 0; j < MODEL_OUTPUT_COL_SIZE; j++) {
+                            unified_output.data.obstacle.values[i][j] = model_output.values[i][j];
+                        }
+                    }
+                    
+                    // Send ABI message
+                    AbiSendMsgMODELOUTPUT(1, get_sys_time_usec(), &unified_output);
+                    
                     if (debug_model) {
                         debug_print("Front model outputs: %.2f, %.2f, %.2f",
-                            model_output.values[0][0], model_output.values[0][1],
-                            model_output.values[0][2]);
+                            unified_output.data.obstacle.values[0][0], 
+                            unified_output.data.obstacle.values[0][1],
+                            unified_output.data.obstacle.values[0][2]);
                     }
                 }
                 else {
@@ -226,31 +220,31 @@ static void* bottom_processing_thread(void* arg) {
                 gettimeofday(&t1, NULL);
             }
 
-            // Calculate image statistics
-            uint8_t min_val = 255;
-            uint8_t max_val = 0;
-            uint32_t sum = 0;
-            uint64_t sum_squares = 0;
+            // // Calculate image statistics
+            // uint8_t min_val = 255;
+            // uint8_t max_val = 0;
+            // uint32_t sum = 0;
+            // uint64_t sum_squares = 0;
 
-            // Only process Y values (luminance) for UYVY format
-            // UYVY format has Y values at positions 1, 3, 5, etc.
-            int pixel_count = img->w * img->h;
-            for (int i = 1; i < img->buf_size; i += 2) { // Process Y values only
-                uint8_t pixel = ((uint8_t*)img->buf)[i];
-                min_val = (pixel < min_val) ? pixel : min_val;
-                max_val = (pixel > max_val) ? pixel : max_val;
-                sum += pixel;
-                sum_squares += (uint64_t)pixel * pixel;
-            }
+            // // Only process Y values (luminance) for UYVY format
+            // // UYVY format has Y values at positions 1, 3, 5, etc.
+            // int pixel_count = img->w * img->h;
+            // for (int i = 1; i < img->buf_size; i += 2) { // Process Y values only
+            //     uint8_t pixel = ((uint8_t*)img->buf)[i];
+            //     min_val = (pixel < min_val) ? pixel : min_val;
+            //     max_val = (pixel > max_val) ? pixel : max_val;
+            //     sum += pixel;
+            //     sum_squares += (uint64_t)pixel * pixel;
+            // }
             
-            float mean = (float)sum / pixel_count;
-            float variance = ((float)sum_squares / pixel_count) - (mean * mean);
-            float std_dev = sqrtf(variance);
+            // float mean = (float)sum / pixel_count;
+            // float variance = ((float)sum_squares / pixel_count) - (mean * mean);
+            // float std_dev = sqrtf(variance);
             
-            if (process_count % 30 == 0) { // Print stats every 30 frames to avoid flooding
-                debug_print("Bottom camera stats: min=%u, max=%u, mean=%.2f, std=%.2f", 
-                          min_val, max_val, mean, std_dev);
-            }
+            // if (process_count % 30 == 0) { // Print stats every 30 frames to avoid flooding
+            //     debug_print("Bottom camera stats: min=%u, max=%u, mean=%.2f, std=%.2f", 
+            //               min_val, max_val, mean, std_dev);
+            // }
 
             bool conv_success = convert_uyvy_to_yuv_downscale(img->buf, img->w, img->h,
                                 bottom_camera_data.processing.yuv_buffer,
@@ -264,16 +258,16 @@ static void* bottom_processing_thread(void* arg) {
                 bool inf_success = run_border_inference(
                     bottom_camera_data.processing.yuv_buffer,
                     30, 30, &border_output);
-                if(inf_success) {
-                    // Send ABI message for border detection
-                    //AbiSendMsgMODELDATA(ABI_BROADCAST,
-                      //  MODEL_TYPE_BORDER,
-                        //1,  // rows
-                        //1,  // cols
-                        //&border_output.value
-                    //);
+                if (inf_success) {
+                    unified_model_output_t unified_output;
+                    unified_output.type = 1; // 1 for border detection
+                    unified_output.data.border.value = border_output.value;
+                    
+                    // Send ABI message
+                    AbiSendMsgMODELOUTPUT(2, get_sys_time_usec(), &unified_output);
+                    
                     if (debug_model) {
-                        debug_print("Bottom model output: %.2f", border_output.value);
+                        debug_print("Bottom model output: %.2f", unified_output.data.border.value);
                     }
                 }
                 if (debug) {

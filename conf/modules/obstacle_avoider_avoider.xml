@@ -9,6 +9,11 @@
   <settings>
     <dl_settings>
         <dl_settings name="obstacle_avoider">
+            <!-- Handling border detection -->
+            <dl_setting var="use_border_detection" min="0" max="1" step="1" 
+                shortname="use_border_detection" module="obstacle_avoider_avoider"
+                values="OFF|ON"/>
+            <dl_setting var="border_threshold" min="0.0" step="0.05" max="1.0"/>
             <!-- Speed settings -->
             <dl_setting var="oag_max_speed" min="0" step="0.1" max="2.0" shortname="max_speed" module="obstacle_avoider_avoider" param="OAG_MAX_SPEED"/>
             <dl_setting var="oag_min_speed" min="0.0" step="0.1" max="1.0" shortname="min_speed" module="obstacle_avoider_avoider"/>

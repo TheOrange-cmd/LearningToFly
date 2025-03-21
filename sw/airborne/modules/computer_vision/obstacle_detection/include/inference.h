@@ -18,6 +18,22 @@ struct border_output_t {
     float value;  // Single output value (already sigmoided in the model)
 };
 
+// Define a union type to hold either output format
+typedef union {
+    struct {
+        float values[MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE]; // [1][3]
+    } obstacle;
+    struct {
+        float value;  // Single output value
+    } border;
+} model_data_t;
+
+// Unified output structure
+typedef struct {
+    uint8_t type;  // Type identifier: 0 for obstacle, 1 for border
+    model_data_t data;
+} unified_model_output_t;
+
 // Initialize both inference systems
 bool init_inference(void);
 

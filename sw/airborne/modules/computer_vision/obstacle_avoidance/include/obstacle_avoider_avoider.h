@@ -23,6 +23,8 @@ extern uint8_t boundary_filter_window;
 extern float danger_threshold;
 extern float oag_smoothing_factor; 
 extern float oag_trend_weight;
+extern bool use_border_detection;
+extern float border_threshold;
 
 // Structure for filtered data
 struct filtered_data_t {
@@ -39,5 +41,6 @@ extern void obstacle_avoider_init(void);
 extern void obstacle_avoider_periodic(void);
 extern void obstacle_avoider_cleanup(void);
 void start_avoider(void);
+void stop_avoider(void);
 
 #endif
