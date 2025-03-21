@@ -56,7 +56,7 @@ static struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camer
 struct obstacle_detection_t obstacle_detection = {
     .front_enabled = true,
     .bottom_enabled = true,
-    .stream_enabled = false
+    .stream_enabled = true
 };
 
 // bool for debug prints
@@ -223,12 +223,35 @@ static void* bottom_processing_thread(void* arg) {
             if (debug) {
                 process_count++;
                 debug_print("Bottom processing - Frame %d", process_count);
-                
-
                 gettimeofday(&t1, NULL);
             }
 
+            // Calculate image statistics
+            uint8_t min_val = 255;
+            uint8_t max_val = 0;
+            uint32_t sum = 0;
+            uint64_t sum_squares = 0;
+
+            // Only process Y values (luminance) for UYVY format
+            // UYVY format has Y values at positions 1, 3, 5, etc.
+            int pixel_count = img->w * img->h;
+            for (int i = 1; i < img->buf_size; i += 2) { // Process Y values only
+                uint8_t pixel = ((uint8_t*)img->buf)[i];
+                min_val = (pixel < min_val) ? pixel : min_val;
+                max_val = (pixel > max_val) ? pixel : max_val;
+                sum += pixel;
+                sum_squares += (uint64_t)pixel * pixel;
+            }
             
+            float mean = (float)sum / pixel_count;
+            float variance = ((float)sum_squares / pixel_count) - (mean * mean);
+            float std_dev = sqrtf(variance);
+            
+            if (process_count % 30 == 0) { // Print stats every 30 frames to avoid flooding
+                debug_print("Bottom camera stats: min=%u, max=%u, mean=%.2f, std=%.2f", 
+                          min_val, max_val, mean, std_dev);
+            }
+
             bool conv_success = convert_uyvy_to_yuv_downscale(img->buf, img->w, img->h,
                                 bottom_camera_data.processing.rgb_buffer,
                                 bottom_camera_data.processing.rgb_buffer_size, 8);
@@ -334,13 +357,6 @@ bool obstacle_detection_init(void) {
         debug_print("Registered video callbacks");
     }
 
-    // Initialize YUV to RGB conversion tables
-    if (!init_yuv_conversion()) {
-        debug_print("Failed to initialize YUV conversion tables");
-        obstacle_detection_cleanup();
-        return false;
-    }
-
     if (obstacle_detection.stream_enabled) {
         // Initialize stream contexts for both cameras
         memset(&front_camera_data.streaming.stream_ctx, 0, sizeof(struct stream_context_t));
@@ -392,13 +408,13 @@ void obstacle_detection_periodic(void) {
     //     }
     //     pthread_mutex_unlock(&front_camera_data.streaming.streaming_mutex);
 
-    //     // Stream bottom camera
-    //     pthread_mutex_lock(&bottom_camera_data.streaming.streaming_mutex);
-    //     if (bottom_camera_data.streaming.frame_ready && bottom_camera_data.streaming.frame) {
-    //         stream_frame(&bottom_camera_data.streaming.stream_ctx, bottom_camera_data.streaming.frame);
-    //         bottom_camera_data.streaming.frame_ready = false;
-    //     }
-    //     pthread_mutex_unlock(&bottom_camera_data.streaming.streaming_mutex);
+        // Stream bottom camera
+        pthread_mutex_lock(&bottom_camera_data.streaming.streaming_mutex);
+        if (bottom_camera_data.streaming.frame_ready && bottom_camera_data.streaming.frame) {
+            stream_frame(&bottom_camera_data.streaming.stream_ctx, bottom_camera_data.streaming.frame);
+            bottom_camera_data.streaming.frame_ready = false;
+        }
+        pthread_mutex_unlock(&bottom_camera_data.streaming.streaming_mutex);
     // }
 }
 
