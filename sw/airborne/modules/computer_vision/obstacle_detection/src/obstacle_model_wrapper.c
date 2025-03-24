@@ -2,5 +2,5 @@
 #include <stdio.h>
 #include "obstacle_model_wrapper.h"
 #define entry entry_obstacle
-#include "models/model_small.c"
+#include "models/front_model.c"
 #undef entry

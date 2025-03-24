@@ -56,12 +56,12 @@ static struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camer
 struct obstacle_detection_t obstacle_detection = {
     .front_enabled = true,
     .bottom_enabled = true,
-    .stream_enabled = true
+    .stream_enabled = false
 };
 
 // bool for debug prints
 static bool debug = false;
-static bool debug_model = false;
+static bool debug_model = true;
 
 struct camera_data_t front_camera_data = {0};
 struct camera_data_t bottom_camera_data = {0};
@@ -78,17 +78,26 @@ static void* front_processing_thread(void* arg) {
             struct timeval t1, t2, t3;
             gettimeofday(&t1, NULL);
 
-            bool conv_success = convert_uyvy_to_yuv_crop(img->buf, 
+            // bool conv_success = convert_uyvy_to_yuv_crop(img->buf, 
+            //     img->w, img->h,
+            //     240, 240,
+            //     front_camera_data.processing.yuv_buffer,
+            //     front_camera_data.processing.yuv_buffer_size);
+
+            bool conv_success = convert_uyvy_to_yuv_crop_with_scale(img->buf, 
                 img->w, img->h,
                 240, 240,
                 front_camera_data.processing.yuv_buffer,
-                front_camera_data.processing.yuv_buffer_size);
+                front_camera_data.processing.yuv_buffer_size, DOWNSCALE_FACTOR);
+
+            
 
             if (conv_success) {
+                gettimeofday(&t2, NULL);
                 struct model_output_t model_output;
                 bool inf_success = run_obstacle_inference(
                     front_camera_data.processing.yuv_buffer,
-                    240, 240, &model_output);
+                    MODEL_INPUT_HEIGHT, MODEL_INPUT_WIDTH, &model_output);
                 if (inf_success) {
                     unified_model_output_t unified_output;
                     unified_output.type = 0; // 0 for obstacle detection
@@ -316,7 +325,7 @@ bool obstacle_detection_init(void) {
 
     // Allocate RGB buffers
     // front_camera_data.processing.yuv_buffer_size = (size_t)FRONT_CAMERA_WIDTH * FRONT_CAMERA_HEIGHT * 3 * sizeof(float);
-    front_camera_data.processing.yuv_buffer_size = (size_t)240 * 240 * 3 * sizeof(float);
+    front_camera_data.processing.yuv_buffer_size = (size_t)MODEL_INPUT_HEIGHT * MODEL_INPUT_WIDTH * 3 * sizeof(float);
     size_t bottom_size = (size_t)30 * 30 * 3 * sizeof(float);
     debug_print("Allocating bottom camera RGB buffer: %dx%d = %zu bytes", 
         30, 30, bottom_size);

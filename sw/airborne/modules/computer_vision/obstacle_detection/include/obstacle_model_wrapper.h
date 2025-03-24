@@ -1,14 +1,12 @@
-// border_model_wrapper.h
+// obstacle_model_wrapper.h
 #ifndef BORDER_MODEL_WRAPPER_H
 #define BORDER_MODEL_WRAPPER_H
 
+#include "model.h"
+
 // First declare the original entry function signature
-void entry(const float tensor_input_1[1][3][240][240], float tensor_42[1][3]);
+void entry(const float tensor_input_1[1][3][MODEL_INPUT_HEIGHT][MODEL_INPUT_HEIGHT], float tensor_42[MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE]);
 
 // Then declare our wrapper function that will call it
-void entry_border(const float tensor_input_1[1][3][240][240], float tensor_42[1][3]);
-
-void clear_border_tensors(void);
-void print_tensor_debug_info(const float* input_tensor, const float* output_tensor);
-
+void entry_obstacle(const float tensor_input_1[1][3][MODEL_INPUT_HEIGHT][MODEL_INPUT_HEIGHT], float tensor_42[MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE]);
 #endif

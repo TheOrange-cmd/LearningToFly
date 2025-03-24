@@ -72,50 +72,30 @@ bool run_obstacle_inference(const float* yuv_data,
     const float* u_data = yuv_data + (width * height);
     const float* v_data = yuv_data + (2 * width * height);
 
-    // Debug: Print some values from the input tensor before copying
-    // debug_print("Input tensor before copy - [0][0][0][0]: %.3f", (*obstacle_input)[0][0][0][0]);
-
     // Copy to input tensor
-    for(int h = 0; h < height; h++) {
-        for(int w = 0; w < width; w++) {
-            int src_idx = h * width + w;
-            (*obstacle_input)[0][0][h][w] = y_data[src_idx];
-            (*obstacle_input)[0][1][h][w] = u_data[src_idx];
-            (*obstacle_input)[0][2][h][w] = v_data[src_idx];
+    for(int c = 0; c < 3; c++) {
+        const float* channel_data;
+        switch(c) {
+            case 0: channel_data = y_data; break;
+            case 1: channel_data = u_data; break;
+            case 2: channel_data = v_data; break;
+        }
+        
+        for(int h = 0; h < height; h++) {
+            for(int w = 0; w < width; w++) {
+                int src_idx = h * width + w;
+                (*obstacle_input)[0][c][h][w] = channel_data[src_idx];
+            }
         }
     }
 
-    // Debug: Print some values from the input tensor after copying
-    // debug_print("Input tensor after copy - [0][0][0][0]: %.3f, [0][1][0][0]: %.3f, [0][2][0][0]: %.3f",
-    //     (*obstacle_input)[0][0][0][0],
-    //     (*obstacle_input)[0][1][0][0],
-    //     (*obstacle_input)[0][2][0][0]);
-
-    memset(obstacle_output, 0, sizeof(obstacle_output_tensor_t));
-
-    // Debug: Print address of entry_obstacle function
-    // debug_print("Calling entry_obstacle at %p", entry_obstacle);
-    
     entry_obstacle(*obstacle_input, *obstacle_output);
 
-    // Treat the output as a flat array
-    float* flat_output = (float*)obstacle_output;
-    
-    // Debug print raw values
-    // debug_print("Raw model outputs: %.3f, %.3f, %.3f", 
-    //     flat_output[0],
-    //     flat_output[1],
-    //     flat_output[2]);
-
     // Copy results 
+    float* flat_output = (float*)obstacle_output;
     output->values[0][0] = flat_output[0];
     output->values[0][1] = flat_output[1];
     output->values[0][2] = flat_output[2];
-
-    // debug_print("Final outputs after copy: %.3f, %.3f, %.3f",
-    //     output->values[0][0],
-    //     output->values[0][1],
-    //     output->values[0][2]);
 
     return true;
 }

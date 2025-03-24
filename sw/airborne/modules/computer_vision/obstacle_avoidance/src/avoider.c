@@ -40,11 +40,12 @@ float oag_trend_weight = 1.0f;
 float danger_columns[NUM_REGIONS] = {0, 0, 0};  // ⚠️ Updated for 3 regions
 float obstacle_free_confidence = 0;
 float avoidance_heading_direction = 0;
-bool use_border_detection = true;
+bool use_border_detection = false;
 float border_threshold = 0.5f;
 
 static struct timeval last_model_update_time;
 static float last_avoidance_heading_direction = 0.0f;
+static bool debug = true;
 
 enum navigation_state_t {
   SAFE,
@@ -91,16 +92,19 @@ static void debug_print(const char* format, ...) {
 
 // Callback function for processing model data
 void myModelOutputHandler(uint8_t sender_id, uint32_t stamp, unified_model_output_t *output) {
+    if (!avoider_enabled) {
+        return;
+    }
     struct timeval now;
     gettimeofday(&now, NULL);
     // debug_print("Received model output from %d at time %u", sender_id, stamp);
     // Handle different model types
     if (output->type == 0) {  // Obstacle detection model
-        // debug_print("Received obstacle output from %d at time %u: [%.2f, %.2f, %.2f]", 
-        //             sender_id, stamp, 
-        //             output->data.obstacle.values[0][0], 
-        //             output->data.obstacle.values[0][1], 
-        //             output->data.obstacle.values[0][2]);
+        debug_print("Received obstacle output from %d at time %u: [%.2f, %.2f, %.2f]", 
+                    sender_id, stamp, 
+                    output->data.obstacle.values[0][0], 
+                    output->data.obstacle.values[0][1], 
+                    output->data.obstacle.values[0][2]);
 
         // Find the highest danger column
         int max_index = 0;
@@ -136,9 +140,10 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp, unified_model_outpu
         last_model_update_time = now;
     }
     else if (output->type == 1) {  // Border detection model
-        debug_print("Received border output from %d at time %u: [%.2f]", 
-                    sender_id, stamp, output->data.border.value);
-                    
+        if (debug) {
+            debug_print("Received border output from %d at time %u: [%.2f]", 
+                sender_id, stamp, output->data.border.value);
+        }
         // Handle border detection logic
         if (use_border_detection) {
             

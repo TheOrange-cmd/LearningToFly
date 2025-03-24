@@ -71,6 +71,201 @@ bool convert_uyvy_to_yuv_crop(const uint8_t* uyvy_data,
     return true;
 }
 
+bool convert_uyvy_to_yuv_crop_downscale2(const uint8_t* uyvy_data,
+    int orig_width,
+    int orig_height,
+    int crop_width,
+    int crop_height,
+    float* yuv_buffer,
+    size_t buffer_size) {
+    
+    // Fixed downscaling factor of 2
+    const int scale = 2;
+    const int out_width = crop_width / scale;
+    const int out_height = crop_height / scale;
+    
+    // Check if crop dimensions are divisible by scale factor
+    if (crop_width % scale != 0 || crop_height % scale != 0) {
+        debug_print("Crop dimensions must be divisible by %d", scale);
+        return false;
+    }
+    
+    // Check buffer size
+    size_t required_size = out_width * out_height * 3 * sizeof(float);
+    if (buffer_size != required_size) {
+        debug_print("Invalid buffer size: got %zu, need %zu", buffer_size, required_size);
+        return false;
+    }
+
+    if (!uyvy_data || !yuv_buffer) {
+        debug_print("Null pointers provided");
+        return false;
+    }
+
+    float* y_channel = yuv_buffer;
+    float* u_channel = yuv_buffer + (out_width * out_height);
+    float* v_channel = yuv_buffer + (2 * out_width * out_height);
+
+    const float inv_255 = 1.0f / 255.0f;
+    const float one_fourth = 0.25f;  // 1/4 for averaging 4 pixels
+    const int stride = orig_width * 2;  // Bytes per row in UYVY format
+    
+    // Calculate crop offsets
+    int y_offset = (orig_height - crop_height) / 2;
+    int x_offset = (orig_width - crop_width) / 2;
+    const uint8_t* crop_start = uyvy_data + (y_offset * stride) + (x_offset * 2);
+
+    // Process each 2x2 block in the cropped area
+    for (int out_y = 0; out_y < out_height; out_y++) {
+        int in_y_base = out_y * scale;
+
+        for (int out_x = 0; out_x < out_width; out_x++) {
+            int in_x_base = out_x * scale;
+            int out_idx = out_y * out_width + out_x;
+
+            // Accumulators
+            float y_sum = 0.0f;
+            float u_sum = 0.0f;
+            float v_sum = 0.0f;
+
+            // Process 2 rows
+            for (int y_offset = 0; y_offset < scale; y_offset++) {
+                const uint8_t* row = crop_start + (in_y_base + y_offset) * stride;
+
+                // Process 1 UYVY group per row (2 pixels)
+                int in_idx = in_x_base * 2;
+
+                // Extract values for 2 pixels in this group
+                uint8_t u = row[in_idx];
+                uint8_t y1 = row[in_idx + 1];
+                uint8_t v = row[in_idx + 2];
+                uint8_t y2 = row[in_idx + 3];
+
+                // Accumulate values
+                y_sum += y1 + y2;
+                u_sum += u;
+                v_sum += v;
+            }
+
+            // Store averaged values
+            y_channel[out_idx] = y_sum * one_fourth * inv_255;     // Average of 4 Y values
+            u_channel[out_idx] = u_sum * 0.5f * inv_255 - 0.5f;    // Average of 2 U values
+            v_channel[out_idx] = v_sum * 0.5f * inv_255 - 0.5f;    // Average of 2 V values
+        }
+    }
+
+    return true;
+}
+
+bool convert_uyvy_to_yuv_crop_downscale4(const uint8_t* uyvy_data,
+    int orig_width,
+    int orig_height,
+    int crop_width,
+    int crop_height,
+    float* yuv_buffer,
+    size_t buffer_size) {
+    
+    const int scale = 4;
+    const int out_width = crop_width / scale;
+    const int out_height = crop_height / scale;
+    
+    // Check if crop dimensions are divisible by scale factor
+    if (crop_width % scale != 0 || crop_height % scale != 0) {
+        debug_print("Crop dimensions must be divisible by %d", scale);
+        return false;
+    }
+    
+    // Check buffer size
+    size_t required_size = out_width * out_height * 3 * sizeof(float);
+    if (buffer_size != required_size) {
+        debug_print("Invalid buffer size: got %zu, need %zu", buffer_size, required_size);
+        return false;
+    }
+
+    if (!uyvy_data || !yuv_buffer) {
+        debug_print("Null pointers provided");
+        return false;
+    }
+
+    float* y_channel = yuv_buffer;
+    float* u_channel = yuv_buffer + (out_width * out_height);
+    float* v_channel = yuv_buffer + (2 * out_width * out_height);
+
+    const float inv_255 = 1.0f / 255.0f;
+    const int stride = orig_width * 2;
+    
+    int y_offset = (orig_height - crop_height) / 2;
+    int x_offset = (orig_width - crop_width) / 2;
+    const uint8_t* crop_start = uyvy_data + (y_offset * stride) + (x_offset * 2);
+
+    // Process blocks with proper averaging
+    for (int out_y = 0; out_y < out_height; out_y++) {
+        for (int out_x = 0; out_x < out_width; out_x++) {
+            int out_idx = out_y * out_width + out_x;
+            float y_sum = 0.0f;
+            float u_sum = 0.0f;
+            float v_sum = 0.0f;
+            int y_count = 0;
+            int uv_count = 0;
+
+            // Process 4x4 block
+            for (int dy = 0; dy < scale; dy++) {
+                const uint8_t* row = crop_start + ((out_y * scale + dy) * stride);
+                
+                for (int dx = 0; dx < scale; dx++) {
+                    int x = out_x * scale + dx;
+                    int pixel_idx = x * 2;
+                    
+                    // For Y channel
+                    y_sum += row[pixel_idx + 1];
+                    y_count++;
+                    
+                    // For U/V channels (sampled at half rate)
+                    if ((dx % 2 == 0) && (dy % 2 == 0)) {
+                        u_sum += row[pixel_idx];
+                        v_sum += row[pixel_idx + 2];
+                        uv_count++;
+                    }
+                }
+            }
+
+            // Normalize exactly as in Python
+            y_channel[out_idx] = (y_sum / y_count) * inv_255;
+            u_channel[out_idx] = (u_sum / uv_count) * inv_255 - 0.5f;
+            v_channel[out_idx] = (v_sum / uv_count) * inv_255 - 0.5f;
+        }
+    }
+
+    return true;
+}
+
+
+// Wrapper function to select the appropriate conversion function based on scale factor
+bool convert_uyvy_to_yuv_crop_with_scale(const uint8_t* uyvy_data,
+    int orig_width,
+    int orig_height,
+    int crop_width,
+    int crop_height,
+    float* yuv_buffer,
+    size_t buffer_size,
+    int scale_factor) {
+    
+    switch (scale_factor) {
+        case 1:
+            return convert_uyvy_to_yuv_crop(uyvy_data, orig_width, orig_height, 
+                                           crop_width, crop_height, yuv_buffer, buffer_size);
+        case 2:
+            return convert_uyvy_to_yuv_crop_downscale2(uyvy_data, orig_width, orig_height, 
+                                                        crop_width, crop_height, yuv_buffer, buffer_size);
+        case 4:
+            return convert_uyvy_to_yuv_crop_downscale4(uyvy_data, orig_width, orig_height, 
+                                                     crop_width, crop_height, yuv_buffer, buffer_size);
+        default:
+            debug_print("Unsupported scale factor: %d. Supported values are 1, 2, and 4.", scale_factor);
+            return false;
+    }
+}
+
 // Convert UYVY image data to YUV format without cropping or downscaling
 bool convert_uyvy_to_yuv(const uint8_t* uyvy_data,
     int width,
@@ -268,6 +463,8 @@ bool convert_uyvy_to_yuv_downscale4(const uint8_t* uyvy_data,
 
     return true;
 }
+
+
 
 // Highly optimized version for 8x downscaling
 bool convert_uyvy_to_yuv_downscale8(const uint8_t* uyvy_data,
