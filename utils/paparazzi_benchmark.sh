@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # Default values
-MODELS_DIR="/home/daniel/Documents/promising_models"
-MODEL_PREFIX="obstacle_model_"
-MODEL_RANGE="1-10"
+MODELS_DIR="./converted_models_downscale2" # directory containing the model files to test
+MODEL_PREFIX="model_"
+MODEL_RANGE="1-10" # range of model files to test, so expected file are model_prefix + model_index + .c
 PAPARAZZI_HOME="/home/daniel/Documents/GitHub/paparazzi"
 AIRCRAFT="bebop_obstacle_avoid"
-DRONE_IP="192.168.42.1"
-MODEL_TARGET_PATH="sw/airborne/modules/computer_vision/obstacle_detection/src/models/front_model.c"
-RUN_TIME=60
+DRONE_IP="192.168.42.1" # IP address of the drone, used for telnet connection to run the application and pipe output to a log file
+MODEL_TARGET_PATH="sw/airborne/modules/computer_vision/obstacle_detection/src/models/front_model.c" # where to copy the model file in the Paparazzi source tree
+RUN_TIME=120 # in seconds - how long to run each model before closing the application
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -100,7 +100,7 @@ for MODEL_IDX in "${MODEL_INDICES[@]}"; do
   
   # Clean aircraft
   echo "Cleaning aircraft..."
-  make -C $PAPARAZZI_HOME -f Makefile.ac AIRCRAFT=$AIRCRAFT clean_ac
+  make -C $PAPARAZZI_HOME -f Makefile.ac AIRCRAFT=$AIRCRAFT clean_ac > /dev/null 2>&1
   if [ $? -ne 0 ]; then
     echo "Failed to clean aircraft for model ${MODEL_IDX}. Skipping."
     continue
@@ -108,15 +108,15 @@ for MODEL_IDX in "${MODEL_INDICES[@]}"; do
   
   # Compile firmware
   echo "Compiling firmware..."
-  make -C $PAPARAZZI_HOME -f Makefile.ac AIRCRAFT=$AIRCRAFT ap.compile
-  if [ $? -ne 0 ]; then
+  make -C $PAPARAZZI_HOME -f Makefile.ac AIRCRAFT=$AIRCRAFT ap.compile > /dev/null 2>&1
+  if [ $? -ne 0 ]; then 
     echo "Failed to compile firmware for model ${MODEL_IDX}. Skipping."
     continue
   fi
   
   # Upload to drone
   echo "Uploading to drone..."
-  make -C $PAPARAZZI_HOME -f Makefile.ac AIRCRAFT=$AIRCRAFT ap.upload
+  make -C $PAPARAZZI_HOME -f Makefile.ac AIRCRAFT=$AIRCRAFT ap.upload > /dev/null 2>&1
   if [ $? -ne 0 ]; then
     echo "Failed to upload firmware for model ${MODEL_IDX}. Skipping."
     continue
@@ -124,7 +124,7 @@ for MODEL_IDX in "${MODEL_INDICES[@]}"; do
   
   # Run test on drone via telnet
   echo "Running test on drone..."
-  LOG_FILE="log_model_${MODEL_IDX}.txt"
+  LOG_FILE="log_model_${MODEL_IDX}_${TIMESTAMP}.txt"
   
   # Connect via telnet and run commands
   (
@@ -140,20 +140,32 @@ for MODEL_IDX in "${MODEL_INDICES[@]}"; do
   ) | telnet > /dev/null
   
   echo "Running model ${MODEL_IDX} for ${RUN_TIME} seconds..."
-  sleep $RUN_TIME
+  STEPS=20
+  interval=$(echo "scale=2; $RUN_TIME / $STEPS" | bc)
+  printf "[%-20s]   0%%" ""
+  # Loop to update progress bar
+  for ((i=0; i<STEPS; i++)); do
+    sleep $interval
+    filled=$((i+1))
+    percentage=$((filled * 5))
+    bar=$(printf "%${filled}s" | tr ' ' '#')
+    printf "\r[%-20s] %3d%%" "$bar" "$percentage"
+  done
+  echo
+
   
-  # Kill the application
-  (
-    echo "open ${DRONE_IP}"
-    sleep 1
-    echo "killall -9 ap.elf"
-    sleep 1
-    echo "exit"
-  ) | telnet > /dev/null
-  
-  # Record results
-  echo "Model ${MODEL_IDX}: Test completed. Log file: ${LOG_FILE}" >> $SUMMARY_FILE
-  echo "Model ${MODEL_IDX} test completed. Log file: ${LOG_FILE}"
+# Kill the application
+(
+  echo "open ${DRONE_IP}"
+  sleep 1
+  echo "killall -9 ap.elf"
+  sleep 1
+  echo "exit"
+) | telnet > /dev/null
+
+# Record results
+echo "Model ${MODEL_IDX}: Test completed. Log file: ${LOG_FILE}" >> $SUMMARY_FILE
+echo "Model ${MODEL_IDX} test completed. Log file: ${LOG_FILE}"
 done
 
 echo "Benchmark complete!"
