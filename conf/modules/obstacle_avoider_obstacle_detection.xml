@@ -18,6 +18,12 @@
         <dl_setting var="obstacle_detection.stream_enabled" min="0" max="1" step="1" 
                     shortname="stream_enable" module="obstacle_detection"
                     values="OFF|ON"/>
+        <dl_setting var="detection_debug" min="0" max="1" step="1" 
+                    shortname="debug" module="obstacle_detection"
+                    values="OFF|ON"/>
+        <dl_setting var="detection_debug_model" min="0" max="1" step="1"
+                    shortname="debug_model" module="obstacle_detection"
+                    values="OFF|ON"/>
       </dl_settings>
     </dl_settings>
   </settings>

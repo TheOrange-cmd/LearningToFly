@@ -79,7 +79,7 @@
     <define name="GAIN_BLUE" value="12.5"/>
     <define name="GAIN_RED" value="9.0"/>
     <define name="TARGET_EXPOSURE" value="30"/>
-    <define name="TARGET_FPS" value="5"/>
+    <define name="TARGET_FPS" value="10"/>
   </section>
 
   <section name="BEBOP_BOTTOM_CAMERA" prefix="MT9V117_">

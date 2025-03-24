@@ -9,7 +9,7 @@
 #define MODEL_INPUT_WIDTH 60
 #define DOWNSCALE_FACTOR 4
 
-// Expected input range 
+// Expected input range
 #define MODEL_INPUT_MIN 0.0f
 #define MODEL_INPUT_MAX 255.0f
 

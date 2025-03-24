@@ -1,43 +1,42 @@
 // Standard includes
+#include <errno.h> // For errno
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>    // For strerror
+#include <sys/stat.h>  // For mkdir and struct stat
+#include <sys/types.h> // For struct stat
 #include <time.h>
-#include <stdbool.h>
-#include <pthread.h>
-#include <sys/types.h>  // For struct stat
-#include <sys/stat.h>   // For mkdir and struct stat
-#include <errno.h>      // For errno
-#include <string.h>     // For strerror
-#include <unistd.h>     // For getcwd
+#include <unistd.h> // For getcwd
 
 #include "debug_print.h"
 DEFINE_DEBUG_PRINT("OBSDET")
 
 // Paparazzi includes
-#include "modules/computer_vision/cv.h"
-#include "modules/computer_vision/lib/vision/image.h"
-#include "modules/computer_vision/lib/encoding/rtp.h"
-#include "modules/computer_vision/lib/encoding/jpeg.h"
-#include "modules/core/abi.h"
 #include "lib/v4l/v4l2.h"
+#include "modules/computer_vision/cv.h"
+#include "modules/computer_vision/lib/encoding/jpeg.h"
+#include "modules/computer_vision/lib/encoding/rtp.h"
+#include "modules/computer_vision/lib/vision/image.h"
+#include "modules/core/abi.h"
 
 // Project includes
-#include "video_stream.h"  // For streaming functionality
 #include "image_convert.h" // For YUV to RGB conversion
-#include "obstacle_detection.h"
+#include "image_utils.h"   // For image saving
 #include "inference.h"     // For running inference
-#include "model.h"        // For model dimensions
-#include "queue.h"       // For processing queue
-#include "image_utils.h" // For image saving
+#include "model.h"         // For model dimensions
+#include "obstacle_detection.h"
+#include "queue.h"        // For processing queue
+#include "video_stream.h" // For streaming functionality
 
 // Other includes
-#include "udp_socket.h"
 #include "mcu_periph/udp.h"
+#include "udp_socket.h"
 
 // Debug configuration
 #define DEBUG_TAG "OBSDET"
 #define MAX_LOG_LENGTH 256
-
 
 #ifndef OBSTACLE_FRONT_RTP_PORT
 #define OBSTACLE_FRONT_RTP_PORT 5100
@@ -47,427 +46,388 @@ DEFINE_DEBUG_PRINT("OBSDET")
 #define OBSTACLE_BOTTOM_RTP_PORT 5101
 #endif
 
-
 // static void debug_print(const char* format, ...);
-static struct image_t* front_camera_callback(struct image_t *img, uint8_t camera_id);
-static struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camera_id);
+static struct image_t *front_camera_callback(struct image_t *img,
+                                             uint8_t camera_id);
+static struct image_t *bottom_camera_callback(struct image_t *img,
+                                              uint8_t camera_id);
 
 // Global variables
 struct obstacle_detection_t obstacle_detection = {
-    .front_enabled = true,
-    .bottom_enabled = true,
-    .stream_enabled = false
-};
+    .front_enabled = true, .bottom_enabled = true, .stream_enabled = false};
 
 // bool for debug prints
-static bool debug = false;
-static bool debug_model = true;
+bool detection_debug = false;
+bool detection_debug_model = true;
 
 struct camera_data_t front_camera_data = {0};
 struct camera_data_t bottom_camera_data = {0};
-static struct video_listener* front_video_listener = NULL;
-static struct video_listener* bottom_video_listener = NULL;
+static struct video_listener *front_video_listener = NULL;
+static struct video_listener *bottom_video_listener = NULL;
 
 // Processing thread functions
-static void* front_processing_thread(void* arg) {
-    struct processing_thread_t* proc = (struct processing_thread_t*)arg;
-    
-    while (proc->running) {
-        struct image_t* img = queue_pop(&proc->queue);
-        if (img) {
-            struct timeval t1, t2, t3;
-            gettimeofday(&t1, NULL);
+static void *front_processing_thread(void *arg) {
+  struct processing_thread_t *proc = (struct processing_thread_t *)arg;
 
-            // bool conv_success = convert_uyvy_to_yuv_crop(img->buf, 
-            //     img->w, img->h,
-            //     240, 240,
-            //     front_camera_data.processing.yuv_buffer,
-            //     front_camera_data.processing.yuv_buffer_size);
+  while (proc->running) {
+    struct image_t *img = queue_pop(&proc->queue);
+    if (img) {
+      struct timeval t1, t2, t3;
+      gettimeofday(&t1, NULL);
 
-            bool conv_success = convert_uyvy_to_yuv_crop_with_scale(img->buf, 
-                img->w, img->h,
-                240, 240,
-                front_camera_data.processing.yuv_buffer,
-                front_camera_data.processing.yuv_buffer_size, DOWNSCALE_FACTOR);
+      bool conv_success = convert_uyvy_to_yuv_crop_with_scale(
+          img->buf, img->w, img->h, 240, 240,
+          front_camera_data.processing.yuv_buffer,
+          front_camera_data.processing.yuv_buffer_size, DOWNSCALE_FACTOR);
 
-            
+      if (conv_success) {
+        gettimeofday(&t2, NULL);
+        struct model_output_t model_output;
+        bool inf_success = run_obstacle_inference(
+            front_camera_data.processing.yuv_buffer, MODEL_INPUT_HEIGHT,
+            MODEL_INPUT_WIDTH, &model_output);
+        if (inf_success) {
+          unified_model_output_t unified_output;
+          unified_output.type = 0; // 0 for obstacle detection
 
-            if (conv_success) {
-                gettimeofday(&t2, NULL);
-                struct model_output_t model_output;
-                bool inf_success = run_obstacle_inference(
-                    front_camera_data.processing.yuv_buffer,
-                    MODEL_INPUT_HEIGHT, MODEL_INPUT_WIDTH, &model_output);
-                if (inf_success) {
-                    unified_model_output_t unified_output;
-                    unified_output.type = 0; // 0 for obstacle detection
-                    
-                    // Copy values
-                    for (int i = 0; i < MODEL_OUTPUT_ROW_SIZE; i++) {
-                        for (int j = 0; j < MODEL_OUTPUT_COL_SIZE; j++) {
-                            unified_output.data.obstacle.values[i][j] = model_output.values[i][j];
-                        }
-                    }
-                    
-                    // Send ABI message
-                    AbiSendMsgMODELOUTPUT(1, get_sys_time_usec(), &unified_output);
-                    
-                    if (debug_model) {
-                        debug_print("Front model outputs: %.2f, %.2f, %.2f",
-                            unified_output.data.obstacle.values[0][0], 
-                            unified_output.data.obstacle.values[0][1],
-                            unified_output.data.obstacle.values[0][2]);
-                    }
-                }
-                else {
-                    debug_print("Failed to run front inference");
-                }
-                gettimeofday(&t3, NULL);
-                
-                float conv_time = (t2.tv_sec - t1.tv_sec) * 1000.0f + 
-                                (t2.tv_usec - t1.tv_usec) / 1000.0f;
-                float inf_time = (t3.tv_sec - t2.tv_sec) * 1000.0f + 
-                                (t3.tv_usec - t2.tv_usec) / 1000.0f;
-                if (debug) {
-                    debug_print("Front processing times - Convert: %.1fms, Inference: %.1fms",
-                            conv_time, inf_time);
-                }
+          // Copy values
+          for (int i = 0; i < MODEL_OUTPUT_ROW_SIZE; i++) {
+            for (int j = 0; j < MODEL_OUTPUT_COL_SIZE; j++) {
+              unified_output.data.obstacle.values[i][j] =
+                  model_output.values[i][j];
             }
-            else {
-                debug_print("Failed to convert front UYVY to YUV");
-            }
+          }
 
-            image_free(img);
-            free(img);
+          // Send ABI message
+          AbiSendMsgMODELOUTPUT(1, get_sys_time_usec(), &unified_output);
+
+          if (detection_debug_model) {
+            debug_print("Front model outputs: %.2f, %.2f, %.2f",
+                        unified_output.data.obstacle.values[0][0],
+                        unified_output.data.obstacle.values[0][1],
+                        unified_output.data.obstacle.values[0][2]);
+          }
+        } else {
+          debug_print("Failed to run front inference");
         }
+        gettimeofday(&t3, NULL);
+
+        float conv_time = (t2.tv_sec - t1.tv_sec) * 1000.0f +
+                          (t2.tv_usec - t1.tv_usec) / 1000.0f;
+        float inf_time = (t3.tv_sec - t2.tv_sec) * 1000.0f +
+                         (t3.tv_usec - t2.tv_usec) / 1000.0f;
+        if (detection_debug) {
+          debug_print(
+              "Front processing times - Convert: %.1fms, Inference: %.1fms",
+              conv_time, inf_time);
+        }
+      } else {
+        debug_print("Failed to convert front UYVY to YUV");
+      }
+
+      image_free(img);
+      free(img);
     }
-    return NULL;
+  }
+  return NULL;
 }
 
-struct image_t* front_camera_callback(struct image_t *img, uint8_t camera_id __attribute__((unused))) {
-    static uint32_t callback_count = 0;
-    static struct timeval last_callback = {0, 0};
-    struct timeval now;
+struct image_t *front_camera_callback(struct image_t *img, uint8_t camera_id
+                                      __attribute__((unused))) {
+  static uint32_t callback_count = 0;
+  static struct timeval last_callback = {0, 0};
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  if (detection_debug) {
+    callback_count++;
+
+    if (last_callback.tv_sec != 0) {
+      float dt = (now.tv_sec - last_callback.tv_sec) * 1000.0f +
+                 (now.tv_usec - last_callback.tv_usec) / 1000.0f;
+      debug_print("Front callback %d - Time since last: %.1fms", callback_count,
+                  dt);
+    }
+    last_callback = now;
+  }
+
+  if (obstacle_detection.front_enabled) {
+    struct image_t *proc_img = malloc(sizeof(struct image_t));
+    if (proc_img) {
+      image_create(proc_img, img->w, img->h, img->type);
+      image_copy(img, proc_img);
+      queue_push(&obstacle_detection.front_processor.queue, proc_img);
+    }
+  }
+
+  return NULL;
+}
+
+struct image_t *bottom_camera_callback(struct image_t *img, uint8_t camera_id
+                                       __attribute__((unused))) {
+  static uint32_t callback_count = 0;
+  static struct timeval last_callback = {0, 0};
+  struct timeval now;
+  if (detection_debug) {
     gettimeofday(&now, NULL);
-    if (debug) {
-        callback_count++;
-    
-        if (last_callback.tv_sec != 0) {
-            float dt = (now.tv_sec - last_callback.tv_sec) * 1000.0f + 
-                       (now.tv_usec - last_callback.tv_usec) / 1000.0f;
-            debug_print("Front callback %d - Time since last: %.1fms", callback_count, dt);
-        }
-        last_callback = now;
+
+    callback_count++;
+
+    if (last_callback.tv_sec != 0) {
+      float dt = (now.tv_sec - last_callback.tv_sec) * 1000.0f +
+                 (now.tv_usec - last_callback.tv_usec) / 1000.0f;
+      debug_print("Bottom callback %d - Time since last: %.1fms",
+                  callback_count, dt);
     }
+    last_callback = now;
+  }
 
-
-    // print shape of received image
-    // debug_print("Received front image with shape: %dx%d", img->w, img->h);
-
-    // Save image to file for debugging
-    // ensure_directory_exists("bebop_cam_debug");
-    // char filename[256];
-    // snprintf(filename, 256, "bebop_cam_debug/front_%d.raw", callback_count);
-    // save_yuv_image(img->buf, img->w, img->h, filename);
-
-
-    if (obstacle_detection.front_enabled) {
-        struct image_t* proc_img = malloc(sizeof(struct image_t));
-        if (proc_img) {
-            image_create(proc_img, img->w, img->h, img->type);
-            image_copy(img, proc_img);
-            queue_push(&obstacle_detection.front_processor.queue, proc_img);
-        }
+  if (obstacle_detection.bottom_enabled) {
+    struct image_t *proc_img = malloc(sizeof(struct image_t));
+    if (proc_img) {
+      image_create(proc_img, img->w, img->h, img->type);
+      image_copy(img, proc_img);
+      queue_push(&obstacle_detection.bottom_processor.queue, proc_img);
     }
-    
-    return NULL;
+  }
+
+  return NULL;
 }
 
-struct image_t* bottom_camera_callback(struct image_t *img, uint8_t camera_id __attribute__((unused))) {
-    static uint32_t callback_count = 0;
-    static struct timeval last_callback = {0, 0};
-    struct timeval now;
-    if (debug) {
-        gettimeofday(&now, NULL);
-    
-        callback_count++;
-        
-        if (last_callback.tv_sec != 0) {
-            float dt = (now.tv_sec - last_callback.tv_sec) * 1000.0f + 
-                       (now.tv_usec - last_callback.tv_usec) / 1000.0f;
-            debug_print("Bottom callback %d - Time since last: %.1fms", callback_count, dt);
+static void *bottom_processing_thread(void *arg) {
+  struct processing_thread_t *proc = (struct processing_thread_t *)arg;
+  static uint32_t process_count = 0;
+  struct timeval t1, t2, t3;
+  while (proc->running) {
+    struct image_t *img = queue_pop(&proc->queue);
+    if (img) {
+      if (detection_debug) {
+        process_count++;
+        debug_print("Bottom processing - Frame %d", process_count);
+        gettimeofday(&t1, NULL);
+      }
+
+      bool conv_success = convert_uyvy_to_yuv_downscale(
+          img->buf, img->w, img->h, bottom_camera_data.processing.yuv_buffer,
+          bottom_camera_data.processing.yuv_buffer_size, 8);
+      if (detection_debug) {
+        gettimeofday(&t2, NULL);
+      }
+
+      if (conv_success) {
+        struct border_output_t border_output;
+        bool inf_success = run_border_inference(
+            bottom_camera_data.processing.yuv_buffer, 30, 30, &border_output);
+        if (inf_success) {
+          unified_model_output_t unified_output;
+          unified_output.type = 1; // 1 for border detection
+          unified_output.data.border.value = border_output.value;
+
+          // Send ABI message
+          AbiSendMsgMODELOUTPUT(2, get_sys_time_usec(), &unified_output);
+
+          if (detection_debug_model) {
+            debug_print("Bottom model output: %.2f",
+                        unified_output.data.border.value);
+          }
         }
-        last_callback = now;
-    }
+        if (detection_debug) {
+          gettimeofday(&t3, NULL);
 
+          float conv_time = (t2.tv_sec - t1.tv_sec) * 1000.0f +
+                            (t2.tv_usec - t1.tv_usec) / 1000.0f;
+          float inf_time = (t3.tv_sec - t2.tv_sec) * 1000.0f +
+                           (t3.tv_usec - t2.tv_usec) / 1000.0f;
 
-    // print shape of received image
-    // debug_print("Received bottom image with shape: %dx%d", img->w, img->h);
-
-    if (obstacle_detection.bottom_enabled) {
-        struct image_t* proc_img = malloc(sizeof(struct image_t));
-        if (proc_img) {
-            image_create(proc_img, img->w, img->h, img->type);
-            image_copy(img, proc_img);
-            queue_push(&obstacle_detection.bottom_processor.queue, proc_img);
+          debug_print(
+              "Bottom processing times - Convert: %.1fms, Inference: %.1fms",
+              conv_time, inf_time);
         }
+      }
+      image_free(img);
+      free(img);
     }
-    
-    return NULL;
+  }
+  return NULL;
 }
-
-static void* bottom_processing_thread(void* arg) {
-    struct processing_thread_t* proc = (struct processing_thread_t*)arg;
-    static uint32_t process_count = 0;
-    struct timeval t1, t2, t3;    
-    while (proc->running) {
-        struct image_t* img = queue_pop(&proc->queue);
-        if (img) {
-            if (debug) {
-                process_count++;
-                debug_print("Bottom processing - Frame %d", process_count);
-                gettimeofday(&t1, NULL);
-            }
-
-            // // Calculate image statistics
-            // uint8_t min_val = 255;
-            // uint8_t max_val = 0;
-            // uint32_t sum = 0;
-            // uint64_t sum_squares = 0;
-
-            // // Only process Y values (luminance) for UYVY format
-            // // UYVY format has Y values at positions 1, 3, 5, etc.
-            // int pixel_count = img->w * img->h;
-            // for (int i = 1; i < img->buf_size; i += 2) { // Process Y values only
-            //     uint8_t pixel = ((uint8_t*)img->buf)[i];
-            //     min_val = (pixel < min_val) ? pixel : min_val;
-            //     max_val = (pixel > max_val) ? pixel : max_val;
-            //     sum += pixel;
-            //     sum_squares += (uint64_t)pixel * pixel;
-            // }
-            
-            // float mean = (float)sum / pixel_count;
-            // float variance = ((float)sum_squares / pixel_count) - (mean * mean);
-            // float std_dev = sqrtf(variance);
-            
-            // if (process_count % 30 == 0) { // Print stats every 30 frames to avoid flooding
-            //     debug_print("Bottom camera stats: min=%u, max=%u, mean=%.2f, std=%.2f", 
-            //               min_val, max_val, mean, std_dev);
-            // }
-
-            bool conv_success = convert_uyvy_to_yuv_downscale(img->buf, img->w, img->h,
-                                bottom_camera_data.processing.yuv_buffer,
-                                bottom_camera_data.processing.yuv_buffer_size, 8);
-            if (debug) {
-                gettimeofday(&t2, NULL);
-            }
-            
-            if (conv_success) {
-                struct border_output_t border_output;
-                bool inf_success = run_border_inference(
-                    bottom_camera_data.processing.yuv_buffer,
-                    30, 30, &border_output);
-                if (inf_success) {
-                    unified_model_output_t unified_output;
-                    unified_output.type = 1; // 1 for border detection
-                    unified_output.data.border.value = border_output.value;
-                    
-                    // Send ABI message
-                    AbiSendMsgMODELOUTPUT(2, get_sys_time_usec(), &unified_output);
-                    
-                    if (debug_model) {
-                        debug_print("Bottom model output: %.2f", unified_output.data.border.value);
-                    }
-                }
-                if (debug) {
-                    gettimeofday(&t3, NULL);
-                
-                    float conv_time = (t2.tv_sec - t1.tv_sec) * 1000.0f + 
-                                    (t2.tv_usec - t1.tv_usec) / 1000.0f;
-                    float inf_time = (t3.tv_sec - t2.tv_sec) * 1000.0f + 
-                                    (t3.tv_usec - t2.tv_usec) / 1000.0f;
-                    
-                    debug_print("Bottom processing times - Convert: %.1fms, Inference: %.1fms",
-                              conv_time, inf_time);
-                    
-                }
-            }
-            image_free(img);
-            free(img);
-        }
-    }
-    return NULL;
-}
-
 
 bool obstacle_detection_init(void) {
-    debug_print("Init called");
+  debug_print("Init called");
 
-    // Initialize processing threads
-    obstacle_detection.front_processor.running = true;
-    queue_init(&obstacle_detection.front_processor.queue);
-    pthread_create(&obstacle_detection.front_processor.thread_id, NULL, 
-                  front_processing_thread, &obstacle_detection.front_processor);
-    
-    obstacle_detection.bottom_processor.running = true;
-    queue_init(&obstacle_detection.bottom_processor.queue);
-    pthread_create(&obstacle_detection.bottom_processor.thread_id, NULL, 
-                  bottom_processing_thread, &obstacle_detection.bottom_processor);
-    
-    // Initialize mutexes for both cameras
-    if (pthread_mutex_init(&front_camera_data.processing.processing_mutex, NULL) != 0 ||
-        pthread_mutex_init(&front_camera_data.streaming.streaming_mutex, NULL) != 0 ||
-        pthread_mutex_init(&bottom_camera_data.processing.processing_mutex, NULL) != 0 ||
-        pthread_mutex_init(&bottom_camera_data.streaming.streaming_mutex, NULL) != 0) {
-        debug_print("Failed to initialize mutexes");
-        return false;
+  // Initialize processing threads
+  obstacle_detection.front_processor.running = true;
+  queue_init(&obstacle_detection.front_processor.queue);
+  pthread_create(&obstacle_detection.front_processor.thread_id, NULL,
+                 front_processing_thread, &obstacle_detection.front_processor);
+
+  obstacle_detection.bottom_processor.running = true;
+  queue_init(&obstacle_detection.bottom_processor.queue);
+  pthread_create(&obstacle_detection.bottom_processor.thread_id, NULL,
+                 bottom_processing_thread,
+                 &obstacle_detection.bottom_processor);
+
+  // Initialize mutexes for both cameras
+  if (pthread_mutex_init(&front_camera_data.processing.processing_mutex,
+                         NULL) != 0 ||
+      pthread_mutex_init(&front_camera_data.streaming.streaming_mutex, NULL) !=
+          0 ||
+      pthread_mutex_init(&bottom_camera_data.processing.processing_mutex,
+                         NULL) != 0 ||
+      pthread_mutex_init(&bottom_camera_data.streaming.streaming_mutex, NULL) !=
+          0) {
+    debug_print("Failed to initialize mutexes");
+    return false;
+  }
+
+  // Allocate RGB buffers
+  // front_camera_data.processing.yuv_buffer_size = (size_t)FRONT_CAMERA_WIDTH *
+  // FRONT_CAMERA_HEIGHT * 3 * sizeof(float);
+  front_camera_data.processing.yuv_buffer_size =
+      (size_t)MODEL_INPUT_HEIGHT * MODEL_INPUT_WIDTH * 3 * sizeof(float);
+  size_t bottom_size = (size_t)30 * 30 * 3 * sizeof(float);
+  debug_print("Allocating bottom camera RGB buffer: %dx%d = %zu bytes", 30, 30,
+              bottom_size);
+  debug_print("Allocating front camera RGB buffer: %dx%d = %zu bytes",
+              FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT,
+              front_camera_data.processing.yuv_buffer_size);
+
+  front_camera_data.processing.yuv_buffer =
+      malloc(front_camera_data.processing.yuv_buffer_size);
+  bottom_camera_data.processing.yuv_buffer_size = bottom_size;
+  bottom_camera_data.processing.yuv_buffer = malloc(bottom_size);
+
+  if (!bottom_camera_data.processing.yuv_buffer) {
+    debug_print("Failed to allocate bottom camera RGB buffer (%zu bytes)",
+                bottom_size);
+    return false;
+  }
+
+  if (!front_camera_data.processing.yuv_buffer) {
+    debug_print("Failed to allocate front camera RGB buffers");
+    cleanup_inference();
+    return false;
+  }
+
+  front_video_listener = cv_add_to_device(
+      &OBSTACLE_DETECTION_FRONT_CAMERA, front_camera_callback, 10,
+      0); // requesting 10 fps, though it seems to be ignored
+  bottom_video_listener = cv_add_to_device(
+      &OBSTACLE_DETECTION_BOTTOM_CAMERA, bottom_camera_callback, 10,
+      0); // requesting 10 fps, though it seems to be ignored
+
+  if (front_video_listener == NULL || bottom_video_listener == NULL) {
+    debug_print("Failed to register video callbacks");
+    obstacle_detection_cleanup();
+    return false;
+  } else {
+    debug_print("Registered video callbacks");
+  }
+
+  if (obstacle_detection.stream_enabled) {
+    // Initialize stream contexts for both cameras
+    memset(&front_camera_data.streaming.stream_ctx, 0,
+           sizeof(struct stream_context_t));
+    memset(&bottom_camera_data.streaming.stream_ctx, 0,
+           sizeof(struct stream_context_t));
+
+    front_camera_data.streaming.stream_ctx.img_jpeg = (struct image_t){
+        .buf = NULL, .buf_size = 0, .w = 0, .h = 0, .type = IMAGE_JPEG};
+
+    bottom_camera_data.streaming.stream_ctx.img_jpeg = (struct image_t){
+        .buf = NULL, .buf_size = 0, .w = 0, .h = 0, .type = IMAGE_JPEG};
+
+    // Initialize streams for both cameras
+    if (!init_stream(&front_camera_data.streaming.stream_ctx, "127.0.0.1",
+                     OBSTACLE_FRONT_RTP_PORT) ||
+        !init_stream(&bottom_camera_data.streaming.stream_ctx, "127.0.0.1",
+                     OBSTACLE_BOTTOM_RTP_PORT)) {
+      debug_print("Failed to initialize video streams");
+      obstacle_detection_cleanup();
+      return false;
     }
+  }
 
-    // Allocate RGB buffers
-    // front_camera_data.processing.yuv_buffer_size = (size_t)FRONT_CAMERA_WIDTH * FRONT_CAMERA_HEIGHT * 3 * sizeof(float);
-    front_camera_data.processing.yuv_buffer_size = (size_t)MODEL_INPUT_HEIGHT * MODEL_INPUT_WIDTH * 3 * sizeof(float);
-    size_t bottom_size = (size_t)30 * 30 * 3 * sizeof(float);
-    debug_print("Allocating bottom camera RGB buffer: %dx%d = %zu bytes", 
-        30, 30, bottom_size);
-    debug_print("Allocating front camera RGB buffer: %dx%d = %zu bytes", 
-        FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT, front_camera_data.processing.yuv_buffer_size);
-    
-    front_camera_data.processing.yuv_buffer = malloc(front_camera_data.processing.yuv_buffer_size);
-    bottom_camera_data.processing.yuv_buffer_size = bottom_size;
-    bottom_camera_data.processing.yuv_buffer = malloc(bottom_size);
+  // Initialize inference system
+  if (!init_inference()) {
+    debug_print("Failed to initialize inference");
+    obstacle_detection_cleanup();
+    return false;
+  }
 
-    if (!bottom_camera_data.processing.yuv_buffer) {
-        debug_print("Failed to allocate bottom camera RGB buffer (%zu bytes)", bottom_size);
-        return false;
-    }
-    
-    if (!front_camera_data.processing.yuv_buffer) {
-        debug_print("Failed to allocate front camera RGB buffers");
-        cleanup_inference();
-        return false;
-    } 
-
-    front_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_FRONT_CAMERA, front_camera_callback, 5, 0);
-    bottom_video_listener = cv_add_to_device(&OBSTACLE_DETECTION_BOTTOM_CAMERA, bottom_camera_callback, 5, 0);
-
-    
-    if (front_video_listener == NULL || bottom_video_listener == NULL) {
-        debug_print("Failed to register video callbacks");
-        obstacle_detection_cleanup();
-        return false;
-    }
-    else {
-        debug_print("Registered video callbacks");
-    }
-
-    if (obstacle_detection.stream_enabled) {
-        // Initialize stream contexts for both cameras
-        memset(&front_camera_data.streaming.stream_ctx, 0, sizeof(struct stream_context_t));
-        memset(&bottom_camera_data.streaming.stream_ctx, 0, sizeof(struct stream_context_t));
-        
-        front_camera_data.streaming.stream_ctx.img_jpeg = (struct image_t){
-            .buf = NULL,
-            .buf_size = 0,
-            .w = 0,
-            .h = 0,
-            .type = IMAGE_JPEG
-        };
-        
-        bottom_camera_data.streaming.stream_ctx.img_jpeg = (struct image_t){
-            .buf = NULL,
-            .buf_size = 0,
-            .w = 0,
-            .h = 0,
-            .type = IMAGE_JPEG
-        };
-
-        // Initialize streams for both cameras
-        if (!init_stream(&front_camera_data.streaming.stream_ctx, "127.0.0.1", OBSTACLE_FRONT_RTP_PORT) ||
-            !init_stream(&bottom_camera_data.streaming.stream_ctx, "127.0.0.1", OBSTACLE_BOTTOM_RTP_PORT)) {
-            debug_print("Failed to initialize video streams");
-            obstacle_detection_cleanup();
-            return false;
-        }
-    }
-
-    // Initialize inference system
-    if (!init_inference()) {
-        debug_print("Failed to initialize inference");
-        obstacle_detection_cleanup();
-        return false;
-    }
-
-    debug_print("Initialized successfully");
-    return true;
+  debug_print("Initialized successfully");
+  return true;
 }
 
 void obstacle_detection_periodic(void) {
-    // if (obstacle_detection.stream_enabled) {
-    //     // Stream front camera
-    //     pthread_mutex_lock(&front_camera_data.streaming.streaming_mutex);
-    //     if (front_camera_data.streaming.frame_ready && front_camera_data.streaming.frame) {
-    //         stream_frame(&front_camera_data.streaming.stream_ctx, front_camera_data.streaming.frame);
-    //         front_camera_data.streaming.frame_ready = false;
-    //     }
-    //     pthread_mutex_unlock(&front_camera_data.streaming.streaming_mutex);
+  // if (obstacle_detection.stream_enabled) {
+  //     // Stream front camera
+  //     pthread_mutex_lock(&front_camera_data.streaming.streaming_mutex);
+  //     if (front_camera_data.streaming.frame_ready &&
+  //     front_camera_data.streaming.frame) {
+  //         stream_frame(&front_camera_data.streaming.stream_ctx,
+  //         front_camera_data.streaming.frame);
+  //         front_camera_data.streaming.frame_ready = false;
+  //     }
+  //     pthread_mutex_unlock(&front_camera_data.streaming.streaming_mutex);
 
-        // Stream bottom camera
-        pthread_mutex_lock(&bottom_camera_data.streaming.streaming_mutex);
-        if (bottom_camera_data.streaming.frame_ready && bottom_camera_data.streaming.frame) {
-            stream_frame(&bottom_camera_data.streaming.stream_ctx, bottom_camera_data.streaming.frame);
-            bottom_camera_data.streaming.frame_ready = false;
-        }
-        pthread_mutex_unlock(&bottom_camera_data.streaming.streaming_mutex);
-    // }
+  // Stream bottom camera
+  pthread_mutex_lock(&bottom_camera_data.streaming.streaming_mutex);
+  if (bottom_camera_data.streaming.frame_ready &&
+      bottom_camera_data.streaming.frame) {
+    stream_frame(&bottom_camera_data.streaming.stream_ctx,
+                 bottom_camera_data.streaming.frame);
+    bottom_camera_data.streaming.frame_ready = false;
+  }
+  pthread_mutex_unlock(&bottom_camera_data.streaming.streaming_mutex);
+  // }
 }
 
 void obstacle_detection_cleanup(void) {
-    // Stop processing threads
-    obstacle_detection.front_processor.running = false;
-    obstacle_detection.bottom_processor.running = false;
-    
-    // Signal threads to wake up and exit
-    pthread_cond_signal(&obstacle_detection.front_processor.queue.not_empty);
-    pthread_cond_signal(&obstacle_detection.bottom_processor.queue.not_empty);
-    
-    // Wait for threads to finish
-    pthread_join(obstacle_detection.front_processor.thread_id, NULL);
-    pthread_join(obstacle_detection.bottom_processor.thread_id, NULL);
+  // Stop processing threads
+  obstacle_detection.front_processor.running = false;
+  obstacle_detection.bottom_processor.running = false;
 
-    // Free RGB buffers
-    free(front_camera_data.processing.yuv_buffer);
-    free(bottom_camera_data.processing.yuv_buffer);
-    front_camera_data.processing.yuv_buffer = NULL;
-    bottom_camera_data.processing.yuv_buffer = NULL;
+  // Signal threads to wake up and exit
+  pthread_cond_signal(&obstacle_detection.front_processor.queue.not_empty);
+  pthread_cond_signal(&obstacle_detection.bottom_processor.queue.not_empty);
 
-    // Cleanup front camera resources
-    if (front_camera_data.streaming.frame != NULL) {
-        image_free(front_camera_data.streaming.frame);
-        free(front_camera_data.streaming.frame);
-        front_camera_data.streaming.frame = NULL;
-    }
-    if (front_camera_data.streaming.stream_ctx.img_jpeg.buf != NULL) {
-        image_free(&front_camera_data.streaming.stream_ctx.img_jpeg);
-    }
-    cleanup_stream(&front_camera_data.streaming.stream_ctx);
+  // Wait for threads to finish
+  pthread_join(obstacle_detection.front_processor.thread_id, NULL);
+  pthread_join(obstacle_detection.bottom_processor.thread_id, NULL);
 
-    // Cleanup bottom camera resources
-    if (bottom_camera_data.streaming.frame != NULL) {
-        image_free(bottom_camera_data.streaming.frame);
-        free(bottom_camera_data.streaming.frame);
-        bottom_camera_data.streaming.frame = NULL;
-    }
-    if (bottom_camera_data.streaming.stream_ctx.img_jpeg.buf != NULL) {
-        image_free(&bottom_camera_data.streaming.stream_ctx.img_jpeg);
-    }
-    cleanup_stream(&bottom_camera_data.streaming.stream_ctx);
+  // Free RGB buffers
+  free(front_camera_data.processing.yuv_buffer);
+  free(bottom_camera_data.processing.yuv_buffer);
+  front_camera_data.processing.yuv_buffer = NULL;
+  bottom_camera_data.processing.yuv_buffer = NULL;
 
-    // Destroy all mutexes
-    pthread_mutex_destroy(&front_camera_data.processing.processing_mutex);
-    pthread_mutex_destroy(&front_camera_data.streaming.streaming_mutex);
-    pthread_mutex_destroy(&bottom_camera_data.processing.processing_mutex);
-    pthread_mutex_destroy(&bottom_camera_data.streaming.streaming_mutex);
+  // Cleanup front camera resources
+  if (front_camera_data.streaming.frame != NULL) {
+    image_free(front_camera_data.streaming.frame);
+    free(front_camera_data.streaming.frame);
+    front_camera_data.streaming.frame = NULL;
+  }
+  if (front_camera_data.streaming.stream_ctx.img_jpeg.buf != NULL) {
+    image_free(&front_camera_data.streaming.stream_ctx.img_jpeg);
+  }
+  cleanup_stream(&front_camera_data.streaming.stream_ctx);
 
-    // Cleanup inference system
-    cleanup_inference();
+  // Cleanup bottom camera resources
+  if (bottom_camera_data.streaming.frame != NULL) {
+    image_free(bottom_camera_data.streaming.frame);
+    free(bottom_camera_data.streaming.frame);
+    bottom_camera_data.streaming.frame = NULL;
+  }
+  if (bottom_camera_data.streaming.stream_ctx.img_jpeg.buf != NULL) {
+    image_free(&bottom_camera_data.streaming.stream_ctx.img_jpeg);
+  }
+  cleanup_stream(&bottom_camera_data.streaming.stream_ctx);
+
+  // Destroy all mutexes
+  pthread_mutex_destroy(&front_camera_data.processing.processing_mutex);
+  pthread_mutex_destroy(&front_camera_data.streaming.streaming_mutex);
+  pthread_mutex_destroy(&bottom_camera_data.processing.processing_mutex);
+  pthread_mutex_destroy(&bottom_camera_data.streaming.streaming_mutex);
+
+  // Cleanup inference system
+  cleanup_inference();
 }
