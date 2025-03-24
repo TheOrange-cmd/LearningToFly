@@ -1,3 +1,37 @@
+/**
+ *
+ * Copyright (C) 2025 Daniel Rugge <d.j.rugge@student.tudelft.nl>
+ *
+ * MIT License
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ */
+/**
+ * @file
+ * sw/airborne/modules/computer_vision/obstacle_detection/src/image_utils.c
+ * @brief Functions used for image preprocessing for model inference, designed
+ * for speed over avoiding code duplication
+ *
+ * @note Developement assisted by Claude Sonnet 3.5
+ */
+
 #include "image_convert.h"
 #include "debug_print.h"
 #include "model.h"
@@ -5,10 +39,6 @@
 #include <stdlib.h>
 #include <string.h>
 DEFINE_DEBUG_PRINT("IMG_CONVERT")
-
-// This file contains several functions to convert uyvy image data to some
-// desired yuv format. The functions are not parameterized on purpose to allow
-// for maximum speed.
 
 // Convert UYVY image data to YUV format, cropping to a specific region -
 // specialized for the front camera

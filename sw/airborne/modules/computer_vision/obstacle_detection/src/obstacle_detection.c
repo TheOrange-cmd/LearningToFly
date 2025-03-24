@@ -1,3 +1,42 @@
+/**
+ *
+ * Copyright (C) 2025 Daniel Rugge <d.j.rugge@student.tudelft.nl>
+ *
+ * MIT License
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ */
+/**
+ * @file
+ * sw/airborne/modules/computer_vision/obstacle_detection/src/obstacle_detection.c
+ * @brief Main file for the sensing part of the two part Cyberzoo challenge
+ * module for obstacle detection, navigation and avoidance. The sensing part
+ * uses the front camera to detect obstacles and the bottom camera to detect the
+ * boundary of the cyberzoo. The module uses neural network models to perform
+ * the detection and sends the results to the autopilot using the ABI. Details
+ * of the models can be found in the folders FrontCamDetector and
+ * BottomCamDetector.
+ *
+ * @note Developement assisted by Claude Sonnet 3.5
+ */
+
 // Standard includes
 #include <errno.h> // For errno
 #include <pthread.h>
@@ -278,9 +317,7 @@ bool obstacle_detection_init(void) {
     return false;
   }
 
-  // Allocate RGB buffers
-  // front_camera_data.processing.yuv_buffer_size = (size_t)FRONT_CAMERA_WIDTH *
-  // FRONT_CAMERA_HEIGHT * 3 * sizeof(float);
+  // Allocate YUV buffers
   front_camera_data.processing.yuv_buffer_size =
       (size_t)MODEL_INPUT_HEIGHT * MODEL_INPUT_WIDTH * 3 * sizeof(float);
   size_t bottom_size = (size_t)30 * 30 * 3 * sizeof(float);
@@ -322,30 +359,6 @@ bool obstacle_detection_init(void) {
     debug_print("Registered video callbacks");
   }
 
-  if (obstacle_detection.stream_enabled) {
-    // Initialize stream contexts for both cameras
-    memset(&front_camera_data.streaming.stream_ctx, 0,
-           sizeof(struct stream_context_t));
-    memset(&bottom_camera_data.streaming.stream_ctx, 0,
-           sizeof(struct stream_context_t));
-
-    front_camera_data.streaming.stream_ctx.img_jpeg = (struct image_t){
-        .buf = NULL, .buf_size = 0, .w = 0, .h = 0, .type = IMAGE_JPEG};
-
-    bottom_camera_data.streaming.stream_ctx.img_jpeg = (struct image_t){
-        .buf = NULL, .buf_size = 0, .w = 0, .h = 0, .type = IMAGE_JPEG};
-
-    // Initialize streams for both cameras
-    if (!init_stream(&front_camera_data.streaming.stream_ctx, "127.0.0.1",
-                     OBSTACLE_FRONT_RTP_PORT) ||
-        !init_stream(&bottom_camera_data.streaming.stream_ctx, "127.0.0.1",
-                     OBSTACLE_BOTTOM_RTP_PORT)) {
-      debug_print("Failed to initialize video streams");
-      obstacle_detection_cleanup();
-      return false;
-    }
-  }
-
   // Initialize inference system
   if (!init_inference()) {
     debug_print("Failed to initialize inference");
@@ -357,29 +370,7 @@ bool obstacle_detection_init(void) {
   return true;
 }
 
-void obstacle_detection_periodic(void) {
-  // if (obstacle_detection.stream_enabled) {
-  //     // Stream front camera
-  //     pthread_mutex_lock(&front_camera_data.streaming.streaming_mutex);
-  //     if (front_camera_data.streaming.frame_ready &&
-  //     front_camera_data.streaming.frame) {
-  //         stream_frame(&front_camera_data.streaming.stream_ctx,
-  //         front_camera_data.streaming.frame);
-  //         front_camera_data.streaming.frame_ready = false;
-  //     }
-  //     pthread_mutex_unlock(&front_camera_data.streaming.streaming_mutex);
-
-  // Stream bottom camera
-  pthread_mutex_lock(&bottom_camera_data.streaming.streaming_mutex);
-  if (bottom_camera_data.streaming.frame_ready &&
-      bottom_camera_data.streaming.frame) {
-    stream_frame(&bottom_camera_data.streaming.stream_ctx,
-                 bottom_camera_data.streaming.frame);
-    bottom_camera_data.streaming.frame_ready = false;
-  }
-  pthread_mutex_unlock(&bottom_camera_data.streaming.streaming_mutex);
-  // }
-}
+void obstacle_detection_periodic(void) {}
 
 void obstacle_detection_cleanup(void) {
   // Stop processing threads

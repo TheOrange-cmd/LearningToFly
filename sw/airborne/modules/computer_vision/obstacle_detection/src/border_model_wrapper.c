@@ -3,5 +3,5 @@
 #include <stdio.h>
 
 #define entry entry_border
-#include "models/border_model_16.c"
+#include "models/bottom_model.c"
 #undef entry
