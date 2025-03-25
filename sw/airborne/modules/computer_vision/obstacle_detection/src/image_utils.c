@@ -69,10 +69,11 @@ void save_yuv_image(const uint8_t *data, int width, int height,
     return;
   }
 
-  size_t bytes_written = fwrite(data, 1, width * height * 2, f);
-  if (bytes_written != width * height * 2) {
-    debug_print("Failed to write all data. Wrote %zu of %d bytes",
-                bytes_written, width * height * 2);
+  size_t total_bytes = (size_t)(width * height * 2);
+  size_t bytes_written = fwrite(data, 1, total_bytes, f);
+  if (bytes_written != total_bytes) {
+    debug_print("Failed to write all data. Wrote %zu of %zu bytes",
+                bytes_written, total_bytes);
   }
 
   fclose(f);

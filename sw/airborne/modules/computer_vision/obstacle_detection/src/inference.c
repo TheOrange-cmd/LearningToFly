@@ -51,7 +51,7 @@ extern union tensor_union_2 tu2;
 extern void entry_obstacle(
     const float tensor_input[MODEL_INPUT_BATCH][MODEL_INPUT_CHANNELS]
                             [MODEL_INPUT_HEIGHT][MODEL_INPUT_WIDTH],
-    float tensor_output[1][1][MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE]);
+    float tensor_output[MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE]);
 
 extern void entry_border(const float tensor_input[1][3][30][30],
                          float tensor_output[1][1]);
@@ -81,7 +81,7 @@ bool init_inference(void) {
       (border_output_tensor_t *)malloc(sizeof(border_output_tensor_t));
 
   if (!obstacle_input || !obstacle_output || !border_input || !border_output) {
-    printf("[Inference] Failed to allocate tensors\n");
+    debug_print("Failed to allocate tensors\n");
     cleanup_inference();
     return false;
   }
@@ -96,9 +96,9 @@ bool run_obstacle_inference(const float *yuv_data, int width, int height,
   }
 
   if (width != MODEL_INPUT_WIDTH || height != MODEL_INPUT_HEIGHT) {
-    printf("[Inference] Invalid obstacle input dimensions: %dx%d (expected "
-           "%dx%d)\n",
-           width, height, MODEL_INPUT_WIDTH, MODEL_INPUT_HEIGHT);
+    debug_print("Invalid obstacle input dimensions: %dx%d (expected "
+                "%dx%d)\n",
+                width, height, MODEL_INPUT_WIDTH, MODEL_INPUT_HEIGHT);
     return false;
   }
 
