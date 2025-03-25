@@ -10,7 +10,7 @@
 
 // Structure to hold obstacle detection outputs
 struct model_output_t {
-  float values[MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE];
+  float values[FRONT_MODEL_OUTPUT_ROW_SIZE][FRONT_MODEL_OUTPUT_COL_SIZE];
 };
 
 // Structure to hold border detection output
@@ -21,7 +21,8 @@ struct border_output_t {
 // Define a union type to hold either output format
 typedef union {
   struct {
-    float values[MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE]; // [1][3]
+    float values[FRONT_MODEL_OUTPUT_ROW_SIZE]
+                [FRONT_MODEL_OUTPUT_COL_SIZE]; // [1][3]
   } obstacle;
   struct {
     float value; // Single output value

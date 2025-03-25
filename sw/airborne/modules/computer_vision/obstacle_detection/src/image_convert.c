@@ -26,8 +26,13 @@
 /**
  * @file
  * sw/airborne/modules/computer_vision/obstacle_detection/src/image_utils.c
- * @brief Functions used for image preprocessing for model inference, designed
- * for speed over avoiding code duplication
+ * @brief Functions used for image preprocessing for model inference,
+ * prioritizing speed over avoiding code duplication. Each function is
+ * specialized for a specific combination of UYVY-YUV conversion, cropping, and
+ * downscaling that is expected by the neural networks. Multiple downscaling
+ * factors are included to allow testing the effect of different resolutions on
+ * inference speed after testing accuracy in the training code to find the best
+ * trade-off between speed and accuracy.
  *
  * @note Developement assisted by Claude Sonnet 3.5
  */
@@ -334,7 +339,8 @@ bool convert_uyvy_to_yuv_crop_with_scale(const uint8_t *uyvy_data,
   }
 }
 
-// Convert UYVY image data to YUV format without cropping or downscaling
+// following are four functions that convert to YUV and downscale the image by
+// a factor of 1 (no downscaling), 2, 4, or 8, without cropping.
 bool convert_uyvy_to_yuv(const uint8_t *uyvy_data, int width, int height,
                          float *yuv_buffer, size_t buffer_size) {
   // Check buffer size
@@ -378,8 +384,6 @@ bool convert_uyvy_to_yuv(const uint8_t *uyvy_data, int width, int height,
   return true;
 }
 
-// following are three functions that downscale the image by a factor of 2, 4,
-// or 8
 bool convert_uyvy_to_yuv_downscale2(const uint8_t *uyvy_data, int width,
                                     int height, float *yuv_buffer,
                                     size_t buffer_size) {
@@ -448,7 +452,6 @@ bool convert_uyvy_to_yuv_downscale2(const uint8_t *uyvy_data, int width,
   return true;
 }
 
-// Highly optimized version for 4x downscaling
 bool convert_uyvy_to_yuv_downscale4(const uint8_t *uyvy_data, int width,
                                     int height, float *yuv_buffer,
                                     size_t buffer_size) {
@@ -532,7 +535,6 @@ bool convert_uyvy_to_yuv_downscale4(const uint8_t *uyvy_data, int width,
   return true;
 }
 
-// Highly optimized version for 8x downscaling
 bool convert_uyvy_to_yuv_downscale8(const uint8_t *uyvy_data, int width,
                                     int height, float *yuv_buffer,
                                     size_t buffer_size) {

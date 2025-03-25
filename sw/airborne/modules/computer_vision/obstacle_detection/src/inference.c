@@ -50,16 +50,18 @@ extern union tensor_union_2 tu2;
 // Forward declarations for both models
 extern void entry_obstacle(
     const float tensor_input[MODEL_INPUT_BATCH][MODEL_INPUT_CHANNELS]
-                            [MODEL_INPUT_HEIGHT][MODEL_INPUT_WIDTH],
-    float tensor_output[MODEL_OUTPUT_ROW_SIZE][MODEL_OUTPUT_COL_SIZE]);
+                            [FRONT_MODEL_INPUT_SIZE][FRONT_MODEL_INPUT_SIZE],
+    float tensor_output[FRONT_MODEL_OUTPUT_ROW_SIZE]
+                       [FRONT_MODEL_OUTPUT_COL_SIZE]);
 
 extern void entry_border(const float tensor_input[1][3][30][30],
                          float tensor_output[1][1]);
 
 typedef float obstacle_input_tensor_t[MODEL_INPUT_BATCH][MODEL_INPUT_CHANNELS]
-                                     [MODEL_INPUT_HEIGHT][MODEL_INPUT_WIDTH];
-typedef float obstacle_output_tensor_t[MODEL_OUTPUT_ROW_SIZE]
-                                      [MODEL_OUTPUT_COL_SIZE];
+                                     [FRONT_MODEL_INPUT_SIZE]
+                                     [FRONT_MODEL_INPUT_SIZE];
+typedef float obstacle_output_tensor_t[FRONT_MODEL_OUTPUT_ROW_SIZE]
+                                      [FRONT_MODEL_OUTPUT_COL_SIZE];
 typedef float border_input_tensor_t[1][3][30][30];
 typedef float border_output_tensor_t[1][1];
 
@@ -95,10 +97,10 @@ bool run_obstacle_inference(const float *yuv_data, int width, int height,
     return false;
   }
 
-  if (width != MODEL_INPUT_WIDTH || height != MODEL_INPUT_HEIGHT) {
+  if (width != FRONT_MODEL_INPUT_SIZE || height != FRONT_MODEL_INPUT_SIZE) {
     debug_print("Invalid obstacle input dimensions: %dx%d (expected "
                 "%dx%d)\n",
-                width, height, MODEL_INPUT_WIDTH, MODEL_INPUT_HEIGHT);
+                width, height, FRONT_MODEL_INPUT_SIZE, FRONT_MODEL_INPUT_SIZE);
     return false;
   }
 

@@ -114,15 +114,15 @@ static void *front_processing_thread(void *arg) {
         gettimeofday(&t2, NULL);
         struct model_output_t model_output;
         bool inf_success = run_obstacle_inference(
-            front_camera_data.processing.yuv_buffer, MODEL_INPUT_HEIGHT,
-            MODEL_INPUT_WIDTH, &model_output);
+            front_camera_data.processing.yuv_buffer, FRONT_MODEL_INPUT_SIZE,
+            FRONT_MODEL_INPUT_SIZE, &model_output);
         if (inf_success) {
           unified_model_output_t unified_output;
           unified_output.type = 0; // 0 for obstacle detection
 
           // Copy values
-          for (int i = 0; i < MODEL_OUTPUT_ROW_SIZE; i++) {
-            for (int j = 0; j < MODEL_OUTPUT_COL_SIZE; j++) {
+          for (int i = 0; i < FRONT_MODEL_OUTPUT_ROW_SIZE; i++) {
+            for (int j = 0; j < FRONT_MODEL_OUTPUT_COL_SIZE; j++) {
               unified_output.data.obstacle.values[i][j] =
                   model_output.values[i][j];
             }
@@ -230,8 +230,8 @@ static void *bottom_processing_thread(void *arg) {
   while (proc->running) {
     struct image_t *img = queue_pop(&proc->queue);
     if (img) {
+      process_count++;
       if (detection_debug) {
-        process_count++;
         debug_print("Bottom processing - Frame %d", process_count);
         gettimeofday(&t1, NULL);
       }
@@ -306,12 +306,13 @@ bool obstacle_detection_init(void) {
 
   // Allocate YUV buffers
   front_camera_data.processing.yuv_buffer_size =
-      (size_t)MODEL_INPUT_HEIGHT * MODEL_INPUT_WIDTH * 3 * sizeof(float);
+      (size_t)FRONT_MODEL_INPUT_SIZE * FRONT_MODEL_INPUT_SIZE * 3 *
+      sizeof(float);
   size_t bottom_size = (size_t)30 * 30 * 3 * sizeof(float);
-  debug_print("Allocating bottom camera RGB buffer: %dx%d = %zu bytes", 30, 30,
+  debug_print("Allocating bottom camera YUV buffer: %dx%d = %zu bytes", 30, 30,
               bottom_size);
-  debug_print("Allocating front camera RGB buffer: %dx%d = %zu bytes",
-              FRONT_CAMERA_WIDTH, FRONT_CAMERA_HEIGHT,
+  debug_print("Allocating front camera YUV buffer: %dx%d = %zu bytes",
+              FRONT_MODEL_INPUT_SIZE, FRONT_MODEL_INPUT_SIZE,
               front_camera_data.processing.yuv_buffer_size);
 
   front_camera_data.processing.yuv_buffer =
