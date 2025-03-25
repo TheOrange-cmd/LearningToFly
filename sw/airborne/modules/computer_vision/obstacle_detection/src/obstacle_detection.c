@@ -26,13 +26,16 @@
 /**
  * @file
  * sw/airborne/modules/computer_vision/obstacle_detection/src/obstacle_detection.c
- * @brief Main file for the sensing part of the two part Cyberzoo challenge
- * module for obstacle detection, navigation and avoidance. The sensing part
- * uses the front camera to detect obstacles and the bottom camera to detect the
- * boundary of the cyberzoo. The module uses neural network models to perform
- * the detection and sends the results to the autopilot using the ABI. Details
- * of the models can be found in the folders FrontCamDetector and
- * BottomCamDetector.
+ * Main file for the sensing part of the two part module for obstacle detection
+ * and avoidance for the TU Delft Autonomous MAV course.
+ *
+ * The sensing part uses the front camera to detect obstacles and the bottom
+ * camera to detect the boundary of the cyberzoo. The module uses neural network
+ * models to perform the detection and sends the results to the autopilot using
+ * the ABI. The detector using the front camera is trained using MiDaS
+ * (https://arxiv.org/abs/1907.01341) generated depth maps that were reduced to
+ * simplified danger values in three column regions in the center of the image.
+ * The bottom module is trained using a small amount of manually labeled data.
  *
  * @note Developement assisted by Claude Sonnet 3.5
  */
@@ -108,7 +111,8 @@ static void *front_processing_thread(void *arg) {
       bool conv_success = convert_uyvy_to_yuv_crop_with_scale(
           img->buf, img->w, img->h, 240, 240,
           front_camera_data.processing.yuv_buffer,
-          front_camera_data.processing.yuv_buffer_size, DOWNSCALE_FACTOR);
+          front_camera_data.processing.yuv_buffer_size,
+          240 / FRONT_MODEL_INPUT_SIZE);
 
       if (conv_success) {
         gettimeofday(&t2, NULL);
@@ -238,7 +242,8 @@ static void *bottom_processing_thread(void *arg) {
 
       bool conv_success = convert_uyvy_to_yuv_downscale(
           img->buf, img->w, img->h, bottom_camera_data.processing.yuv_buffer,
-          bottom_camera_data.processing.yuv_buffer_size, 8);
+          bottom_camera_data.processing.yuv_buffer_size,
+          240 / BOTTOM_MODEL_INPUT_SIZE);
       if (detection_debug) {
         gettimeofday(&t2, NULL);
       }
@@ -246,7 +251,8 @@ static void *bottom_processing_thread(void *arg) {
       if (conv_success) {
         struct border_output_t border_output;
         bool inf_success = run_border_inference(
-            bottom_camera_data.processing.yuv_buffer, 30, 30, &border_output);
+            bottom_camera_data.processing.yuv_buffer, BOTTOM_MODEL_INPUT_SIZE,
+            BOTTOM_MODEL_INPUT_SIZE, &border_output);
         if (inf_success) {
           unified_model_output_t unified_output;
           unified_output.type = 1; // 1 for border detection
@@ -308,9 +314,10 @@ bool obstacle_detection_init(void) {
   front_camera_data.processing.yuv_buffer_size =
       (size_t)FRONT_MODEL_INPUT_SIZE * FRONT_MODEL_INPUT_SIZE * 3 *
       sizeof(float);
-  size_t bottom_size = (size_t)30 * 30 * 3 * sizeof(float);
-  debug_print("Allocating bottom camera YUV buffer: %dx%d = %zu bytes", 30, 30,
-              bottom_size);
+  size_t bottom_size = (size_t)BOTTOM_MODEL_INPUT_SIZE *
+                       BOTTOM_MODEL_INPUT_SIZE * 3 * sizeof(float);
+  debug_print("Allocating bottom camera YUV buffer: %dx%d = %zu bytes",
+              BOTTOM_MODEL_INPUT_SIZE, BOTTOM_MODEL_INPUT_SIZE, bottom_size);
   debug_print("Allocating front camera YUV buffer: %dx%d = %zu bytes",
               FRONT_MODEL_INPUT_SIZE, FRONT_MODEL_INPUT_SIZE,
               front_camera_data.processing.yuv_buffer_size);

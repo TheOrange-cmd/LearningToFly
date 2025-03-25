@@ -2,7 +2,13 @@
 <module name="obstacle_avoider_obstacle_detection" dir="computer_vision/obstacle_detection">
   <doc>
     <description>
-      Simple grid-based obstacle detection using ONNX2C model
+      Obstacle detection module for the TU Delft Autonomous MAV course. The module uses two small CNNs to 
+      detect obstacles in the front camera image and the boundary of the Cyberzoo testing environment in the bottom camera image. 
+      The bottom camera CNN is trained using a small amount of manually labeled data and some augmented data using brightness, contrast, and small rotations.
+      The front camera CNN is trained using a large amount of data generated with MiDaS (https://arxiv.org/abs/1907.01341), an open-source monocular depth estimation model. 
+      The data from MiDaS is converted to a simple danger value for three columns in the cropped center square of the image to allow inference with a small CNN.
+      Each column can have a value of 0-1, where 0 is safe and 1 is dangerous. The CNN is trained to predict the danger value for each column.
+      The CNNs are trained using the PyTorch framework and converted to ONNX format, and then to C using ONNX2C.
     </description>
   </doc>
 

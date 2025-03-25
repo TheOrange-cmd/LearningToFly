@@ -48,21 +48,22 @@ extern union tensor_union_1 tu1;
 extern union tensor_union_2 tu2;
 
 // Forward declarations for both models
-extern void entry_obstacle(
-    const float tensor_input[MODEL_INPUT_BATCH][MODEL_INPUT_CHANNELS]
-                            [FRONT_MODEL_INPUT_SIZE][FRONT_MODEL_INPUT_SIZE],
-    float tensor_output[FRONT_MODEL_OUTPUT_ROW_SIZE]
-                       [FRONT_MODEL_OUTPUT_COL_SIZE]);
+extern void
+entry_obstacle(const float tensor_input[1][3][FRONT_MODEL_INPUT_SIZE]
+                                       [FRONT_MODEL_INPUT_SIZE],
+               float tensor_output[FRONT_MODEL_OUTPUT_ROW_SIZE]
+                                  [FRONT_MODEL_OUTPUT_COL_SIZE]);
 
-extern void entry_border(const float tensor_input[1][3][30][30],
+extern void entry_border(const float tensor_input[1][3][BOTTOM_MODEL_INPUT_SIZE]
+                                                 [BOTTOM_MODEL_INPUT_SIZE],
                          float tensor_output[1][1]);
 
-typedef float obstacle_input_tensor_t[MODEL_INPUT_BATCH][MODEL_INPUT_CHANNELS]
-                                     [FRONT_MODEL_INPUT_SIZE]
+typedef float obstacle_input_tensor_t[1][3][FRONT_MODEL_INPUT_SIZE]
                                      [FRONT_MODEL_INPUT_SIZE];
 typedef float obstacle_output_tensor_t[FRONT_MODEL_OUTPUT_ROW_SIZE]
                                       [FRONT_MODEL_OUTPUT_COL_SIZE];
-typedef float border_input_tensor_t[1][3][30][30];
+typedef float border_input_tensor_t[1][3][BOTTOM_MODEL_INPUT_SIZE]
+                                   [BOTTOM_MODEL_INPUT_SIZE];
 typedef float border_output_tensor_t[1][1];
 
 static obstacle_input_tensor_t *obstacle_input = NULL;
