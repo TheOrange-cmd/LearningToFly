@@ -26,7 +26,7 @@
 /**
  * @file
  * sw/airborne/modules/computer_vision/obstacle_detection/src/inference.c
- * @brief Queue functions for vision processing
+ * @brief Queue functions for vision processing.
  *
  * @note Developement assisted by Claude Sonnet 3.5
  */
@@ -71,6 +71,15 @@ static obstacle_output_tensor_t *obstacle_output = NULL;
 static border_input_tensor_t *border_input = NULL;
 static border_output_tensor_t *border_output = NULL;
 
+/**
+ * @brief Initialize neural network inference system
+ *
+ * Allocates memory for input/output tensors of both obstacle and border models.
+ * Must be called before any inference operations.
+ *
+ * @return true All tensor allocations succeeded
+ * @return false Failed to allocate any tensor (cleans up partial allocations)
+ */
 bool init_inference(void) {
   // Allocate tensors for obstacle detection
   obstacle_input =
@@ -92,6 +101,20 @@ bool init_inference(void) {
   return true;
 }
 
+/**
+ * @brief Run obstacle detection model inference
+ *
+ * Processes YUV image data through the obstacle detection neural network.
+ * Validates input dimensions match model requirements (FRONT_MODEL_INPUT_SIZE).
+ * Copies YUV channels to input tensor and executes model.
+ *
+ * @param yuv_data Pointer to YUV422 planar data (Y followed by U then V)
+ * @param width Input image width (must match FRONT_MODEL_INPUT_SIZE)
+ * @param height Input image height (must match FRONT_MODEL_INPUT_SIZE)
+ * @param output Structure to store model outputs (3 danger values)
+ * @return true Inference succeeded and output populated
+ * @return false Invalid inputs or allocation failure
+ */
 bool run_obstacle_inference(const float *yuv_data, int width, int height,
                             struct model_output_t *output) {
   if (!obstacle_input || !obstacle_output || !yuv_data || !output) {
@@ -144,6 +167,20 @@ bool run_obstacle_inference(const float *yuv_data, int width, int height,
   return true;
 }
 
+/**
+ * @brief Run border detection model inference
+ *
+ * Processes YUV image data through the border detection neural network.
+ * Centers U/V channels around zero (original range 0-1 -> -0.5 to 0.5).
+ * Clamps output to [0.0, 1.0] range and handles NaN cases.
+ *
+ * @param yuv_data Pointer to YUV422 planar data (Y followed by U then V)
+ * @param width Input image width (must match BOTTOM_MODEL_INPUT_SIZE)
+ * @param height Input image height (must match BOTTOM_MODEL_INPUT_SIZE)
+ * @param output Structure to store single border confidence value
+ * @return true Inference succeeded and output populated
+ * @return false Invalid inputs or allocation failure
+ */
 bool run_border_inference(const float *yuv_data, int width, int height,
                           struct border_output_t *output) {
 
@@ -225,6 +262,12 @@ bool run_border_inference(const float *yuv_data, int width, int height,
   return true;
 }
 
+/**
+ * @brief Cleanup inference system resources
+ *
+ * Releases all allocated tensor memory and nullifies pointers.
+ * Should be called during module shutdown or after initialization failure.
+ */
 void cleanup_inference(void) {
   free(obstacle_input);
   free(obstacle_output);

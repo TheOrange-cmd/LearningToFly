@@ -26,7 +26,8 @@
 /**
  * @file
  * sw/airborne/modules/computer_vision/obstacle_detection/src/image_utils.c
- * @brief Functions to save images to disk
+ * @brief Functions to save images to disk. Note that saving images is slow,
+ * only use for debugging purposes or for collecting training data.
  *
  * @note Developement assisted by Claude Sonnet 3.5
  */
@@ -41,6 +42,14 @@
 
 DEFINE_DEBUG_PRINT("IMG_UTILS")
 
+/**
+ * @brief Create directory if it doesn't exist
+ *
+ * Checks directory existence and creates with 0700 permissions if missing.
+ * Logs success/failure via debug_print.
+ *
+ * @param path Directory path to check/create
+ */
 void ensure_directory_exists(const char *path) {
   struct stat st;
   if (stat(path, &st) == -1) {
@@ -53,6 +62,17 @@ void ensure_directory_exists(const char *path) {
   }
 }
 
+/**
+ * @brief Save raw YUV422 image data to file
+ *
+ * Writes UYVY format data directly to binary file. Handles null pointers
+ * and file errors with debug logging.
+ *
+ * @param data UYVY422 image buffer
+ * @param width Image width in pixels
+ * @param height Image height in pixels
+ * @param filename Full output path including filename
+ */
 void save_yuv_image(const uint8_t *data, int width, int height,
                     const char *filename) {
   debug_print("Attempting to save YUV image to %s", filename);

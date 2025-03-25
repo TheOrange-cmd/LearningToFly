@@ -98,7 +98,17 @@ struct camera_data_t bottom_camera_data = {0};
 static struct video_listener *front_video_listener = NULL;
 static struct video_listener *bottom_video_listener = NULL;
 
-// Processing thread functions
+/**
+ * @brief Front camera processing thread function
+ *
+ * This thread continuously processes images from the front camera queue.
+ * Performs image conversion, runs obstacle detection inference, and sends
+ * results via ABI messages. Times and logs processing stages when debug
+ * enabled.
+ *
+ * @param arg Pointer to processing_thread_t structure containing thread context
+ * @return NULL on thread exit
+ */
 static void *front_processing_thread(void *arg) {
   struct processing_thread_t *proc = (struct processing_thread_t *)arg;
 
@@ -166,15 +176,25 @@ static void *front_processing_thread(void *arg) {
   return NULL;
 }
 
+/**
+ * @brief Front camera image capture callback
+ *
+ * Receives images from front camera, copies them to processing queue.
+ * Logs timing statistics when debug enabled.
+ *
+ * @param img Captured image pointer
+ * @param camera_id Unused camera identifier
+ * @return NULL as image is consumed by processing thread
+ */
 struct image_t *front_camera_callback(struct image_t *img, uint8_t camera_id
                                       __attribute__((unused))) {
   static uint32_t callback_count = 0;
   static struct timeval last_callback = {0, 0};
   struct timeval now;
   gettimeofday(&now, NULL);
-  if (detection_debug) {
-    callback_count++;
+  callback_count++;
 
+  if (detection_debug) {
     if (last_callback.tv_sec != 0) {
       float dt = (now.tv_sec - last_callback.tv_sec) * 1000.0f +
                  (now.tv_usec - last_callback.tv_usec) / 1000.0f;
@@ -196,6 +216,16 @@ struct image_t *front_camera_callback(struct image_t *img, uint8_t camera_id
   return NULL;
 }
 
+/**
+ * @brief Bottom camera image capture callback
+ *
+ * Receives images from bottom camera, copies them to processing queue.
+ * Logs timing statistics when debug enabled.
+ *
+ * @param img Captured image pointer
+ * @param camera_id Unused camera identifier
+ * @return NULL as image is consumed by processing thread
+ */
 struct image_t *bottom_camera_callback(struct image_t *img, uint8_t camera_id
                                        __attribute__((unused))) {
   static uint32_t callback_count = 0;
@@ -227,6 +257,17 @@ struct image_t *bottom_camera_callback(struct image_t *img, uint8_t camera_id
   return NULL;
 }
 
+/**
+ * @brief Bottom camera processing thread function
+ *
+ * This thread continuously processes images from the bottom camera queue.
+ * Performs image conversion, runs border detection inference, and sends
+ * results via ABI messages. Times and logs processing stages when debug
+ * enabled.
+ *
+ * @param arg Pointer to processing_thread_t structure containing thread context
+ * @return NULL on thread exit
+ */
 static void *bottom_processing_thread(void *arg) {
   struct processing_thread_t *proc = (struct processing_thread_t *)arg;
   static uint32_t process_count = 0;
@@ -286,6 +327,16 @@ static void *bottom_processing_thread(void *arg) {
   return NULL;
 }
 
+/**
+ * @brief Initialize obstacle detection module
+ *
+ * Starts processing threads, initializes synchronization primitives,
+ * allocates image buffers, registers camera callbacks, and initializes
+ * neural network inference system.
+ *
+ * @return true if initialization succeeded
+ * @return false if any initialization step failed
+ */
 bool obstacle_detection_init(void) {
   debug_print("Init called");
 
@@ -365,8 +416,22 @@ bool obstacle_detection_init(void) {
   return true;
 }
 
+/**
+ * @brief Periodic function for obstacle detection module
+ *
+ * Currently unused placeholder for periodic tasks as all periodic tasks are
+ * handled in the cv vision threads. Model outputs are immediately sent to the
+ * avoider module.
+ */
 void obstacle_detection_periodic(void) {}
 
+/**
+ * @brief Cleanup and shutdown obstacle detection module
+ *
+ * Stops processing threads, frees allocated memory, releases synchronization
+ * primitives, and cleans up inference resources. Called in case initialization
+ * fails.
+ */
 void obstacle_detection_cleanup(void) {
   // Stop processing threads
   obstacle_detection.front_processor.running = false;

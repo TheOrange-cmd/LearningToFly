@@ -27,12 +27,13 @@
  * @file
  * sw/airborne/modules/computer_vision/obstacle_detection/src/image_utils.c
  * @brief Functions used for image preprocessing for model inference,
- * prioritizing speed over avoiding code duplication. Each function is
- * specialized for a specific combination of UYVY-YUV conversion, cropping, and
- * downscaling that is expected by the neural networks. Multiple downscaling
- * factors are included to allow testing the effect of different resolutions on
- * inference speed after testing accuracy in the training code to find the best
- * trade-off between speed and accuracy.
+ * prioritizing speed over avoiding code duplication.
+ *
+ * Each function is specialized for a specific combination of UYVY-YUV
+ * conversion, cropping, and downscaling that is expected by the neural
+ * networks. Multiple downscaling factors are included to allow testing the
+ * effect of different resolutions on inference speed after testing accuracy in
+ * the training code to find the best trade-off between speed and accuracy.
  *
  * @note Developement assisted by Claude Sonnet 3.5
  */
@@ -81,8 +82,23 @@ bool convert_uyvy_to_yuv_downscale8(const uint8_t *uyvy_data, int orig_width,
 bool convert_uyvy_to_yuv(const uint8_t *uyvy_data, int width, int height,
                          float *yuv_buffer, size_t buffer_size);
 
-// Convert UYVY image data to YUV format, cropping to a specific region -
-// specialized for the front camera
+/**
+ * @brief Convert UYVY to YUV with center cropping (no downscaling)
+ *
+ * Specialized for front camera input. Converts UYVY422 to planar YUV420 format,
+ * cropping to specified dimensions from image center. Validates buffer size.
+ *
+ * @param uyvy_data Input UYVY422 image data
+ * @param orig_width Original image width
+ * @param orig_height Original image height
+ * @param crop_width Width of cropped region
+ * @param crop_height Height of cropped region
+ * @param yuv_buffer Output buffer for planar YUV data (Y + U + V)
+ * @param buffer_size Size of output buffer (must be
+ * 3*crop_width*crop_height*sizeof(float))
+ * @return true Conversion succeeded
+ * @return false Invalid parameters or buffer size mismatch
+ */
 bool convert_uyvy_to_yuv_crop(const uint8_t *uyvy_data, int orig_width,
                               int orig_height, int crop_width, int crop_height,
                               float *yuv_buffer, size_t buffer_size) {
@@ -141,6 +157,22 @@ bool convert_uyvy_to_yuv_crop(const uint8_t *uyvy_data, int orig_width,
   return true;
 }
 
+/**
+ * @brief Convert UYVY to YUV with 2x downscaling and center cropping
+ *
+ * Processes 2x2 blocks with averaging. Cropped dimensions must be divisible
+ * by 2.
+ *
+ * @param uyvy_data Input UYVY422 image data
+ * @param orig_width Original image width
+ * @param orig_height Original image height
+ * @param crop_width Width of cropped region (must be even)
+ * @param crop_height Height of cropped region (must be even)
+ * @param yuv_buffer Output buffer (3*(crop/2)^2 floats)
+ * @param buffer_size Required buffer size
+ * @return true Conversion succeeded
+ * @return false Invalid parameters or dimension mismatch
+ */
 bool convert_uyvy_to_yuv_crop_downscale2(const uint8_t *uyvy_data,
                                          int orig_width, int orig_height,
                                          int crop_width, int crop_height,
@@ -229,6 +261,22 @@ bool convert_uyvy_to_yuv_crop_downscale2(const uint8_t *uyvy_data,
   return true;
 }
 
+/**
+ * @brief Convert UYVY to YUV with 4x downscaling and center cropping
+ *
+ * Processes 4x4 blocks with Y channel averaging and UV subsampling.
+ * Cropped dimensions must be divisible by 4.
+ *
+ * @param uyvy_data Input UYVY422 image data
+ * @param orig_width Original image width
+ * @param orig_height Original image height
+ * @param crop_width Width of cropped region (must be divisible by 4)
+ * @param crop_height Height of cropped region (must be divisible by 4)
+ * @param yuv_buffer Output buffer (3*(crop/4)^2 floats)
+ * @param buffer_size Required buffer size
+ * @return true Conversion succeeded
+ * @return false Invalid parameters or dimension mismatch
+ */
 bool convert_uyvy_to_yuv_crop_downscale4(const uint8_t *uyvy_data,
                                          int orig_width, int orig_height,
                                          int crop_width, int crop_height,
@@ -310,8 +358,15 @@ bool convert_uyvy_to_yuv_crop_downscale4(const uint8_t *uyvy_data,
   return true;
 }
 
-// Wrapper function to select the appropriate conversion function based on scale
-// factor
+/**
+ * @brief Select cropped conversion based on scale factor
+ *
+ * Dispatches to appropriate conversion function for scale factors 1, 2, or 4.
+ *
+ * @param scale_factor Downscaling factor (1, 2, or 4)
+ * @return true Supported scale factor and conversion succeeded
+ * @return false Unsupported scale factor or conversion error
+ */
 bool convert_uyvy_to_yuv_crop_with_scale(const uint8_t *uyvy_data,
                                          int orig_width, int orig_height,
                                          int crop_width, int crop_height,
@@ -339,8 +394,18 @@ bool convert_uyvy_to_yuv_crop_with_scale(const uint8_t *uyvy_data,
   }
 }
 
-// following are four functions that convert to YUV and downscale the image by
-// a factor of 1 (no downscaling), 2, 4, or 8, without cropping.
+/**
+ * @brief Convert full UYVY image to YUV without downscaling
+ *
+ * Direct conversion preserving original resolution. Output is planar YUV floats
+ * normalized to [0,1] for Y and [-0.5,0.5] for UV.
+ *
+ * @param width Input image width
+ * @param height Input image height
+ * @param buffer_size Must be 3*width*height*sizeof(float)
+ * @return true Conversion succeeded
+ * @return false Buffer size mismatch or null pointers
+ */
 bool convert_uyvy_to_yuv(const uint8_t *uyvy_data, int width, int height,
                          float *yuv_buffer, size_t buffer_size) {
   // Check buffer size
@@ -384,6 +449,16 @@ bool convert_uyvy_to_yuv(const uint8_t *uyvy_data, int width, int height,
   return true;
 }
 
+/**
+ * @brief Downscale UYVY image by factor of 2 and convert to YUV
+ *
+ * Processes 2x2 blocks with 8 Y samples and 4 UV samples per output pixel.
+ *
+ * @param width Must be divisible by 2
+ * @param height Must be divisible by 2
+ * @return true Conversion succeeded
+ * @return false Odd dimensions or buffer mismatch
+ */
 bool convert_uyvy_to_yuv_downscale2(const uint8_t *uyvy_data, int width,
                                     int height, float *yuv_buffer,
                                     size_t buffer_size) {
@@ -451,7 +526,16 @@ bool convert_uyvy_to_yuv_downscale2(const uint8_t *uyvy_data, int width,
   }
   return true;
 }
-
+/**
+ * @brief Downscale UYVY image by factor of 4 and convert to YUV.
+ *
+ * Processes 4x4 blocks with 16 Y samples and 8 UV samples per output pixel.
+ *
+ * @param width Must be divisible by 4
+ * @param height Must be divisible by 4
+ * @return true Conversion succeeded
+ * @return false Invalid dimensions or buffer size
+ */
 bool convert_uyvy_to_yuv_downscale4(const uint8_t *uyvy_data, int width,
                                     int height, float *yuv_buffer,
                                     size_t buffer_size) {
@@ -535,6 +619,16 @@ bool convert_uyvy_to_yuv_downscale4(const uint8_t *uyvy_data, int width,
   return true;
 }
 
+/**
+ * @brief Downscale UYVY image by factor of 8
+ *
+ * Processes 8x8 blocks with 64 Y samples and 32 UV samples per output pixel.
+ *
+ * @param width Must be divisible by 8
+ * @param height Must be divisible by 8
+ * @return true Conversion succeeded
+ * @return false Invalid dimensions or buffer size
+ */
 bool convert_uyvy_to_yuv_downscale8(const uint8_t *uyvy_data, int width,
                                     int height, float *yuv_buffer,
                                     size_t buffer_size) {
@@ -618,8 +712,15 @@ bool convert_uyvy_to_yuv_downscale8(const uint8_t *uyvy_data, int width,
   return true;
 }
 
-// Wrapper function that calls the appropriate conversion with downscaling (or
-// not)
+/**
+ * @brief Select downscaling conversion wrapper
+ *
+ * Routes to conversion functions based on downscale factor (1, 2, 4, 8)
+ *
+ * @param downscale_factor Supported factors: 1, 2, 4, 8
+ * @return true Successful dispatch and conversion
+ * @return false Unsupported factor or conversion error
+ */
 bool convert_uyvy_to_yuv_downscale(const uint8_t *uyvy_data, int width,
                                    int height, float *yuv_buffer,
                                    size_t buffer_size, int downscale_factor) {

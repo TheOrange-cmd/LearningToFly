@@ -33,6 +33,15 @@
 
 #include "queue.h"
 
+/**
+ * @brief Initialize a thread-safe image queue
+ *
+ * Initializes queue structure with empty state and synchronization primitives.
+ * Must be called before using the queue.
+ *
+ * @param q Queue structure to initialize
+ * @return true Always returns true
+ */
 bool queue_init(struct image_queue_t *q) {
   q->front = 0;
   q->rear = -1;
@@ -43,6 +52,17 @@ bool queue_init(struct image_queue_t *q) {
   return true;
 }
 
+/**
+ * @brief Push an image frame into the queue
+ *
+ * Thread-safe operation that adds image to queue. If queue is full,
+ * drops oldest frame to make space (frame count limited by MAX_QUEUE_SIZE).
+ * Signals waiting consumers when new data is available.
+ *
+ * @param q Queue structure to modify
+ * @param img Image to add to queue (will be copied)
+ * @return true On successful push (always succeeds, may drop old frames)
+ */
 bool queue_push(struct image_queue_t *q, struct image_t *img) {
   pthread_mutex_lock(&q->mutex);
 
@@ -67,6 +87,15 @@ bool queue_push(struct image_queue_t *q, struct image_t *img) {
   return true;
 }
 
+/**
+ * @brief Pop an image frame from the queue
+ *
+ * Thread-safe blocking operation that removes and returns the oldest image.
+ * Will wait indefinitely if queue is empty until new frames arrive.
+ *
+ * @param q Queue structure to read from
+ * @return struct image_t* Popped image pointer, NULL only if interrupted
+ */
 struct image_t *queue_pop(struct image_queue_t *q) {
   pthread_mutex_lock(&q->mutex);
 
