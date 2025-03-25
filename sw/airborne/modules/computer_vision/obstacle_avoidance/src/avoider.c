@@ -44,6 +44,11 @@ float avoidance_heading_direction = 0;
 bool use_border_detection = false;
 float border_threshold = 0.5f;
 
+uint8_t filter_size = 5;
+float heading_buffer[filter_size];
+uint8_t buffer_index = 0;
+float buffer_weights[filter_size] = {5, 4, 3, 2, 1}; //Linear weight for buffer, most recent weighs most
+
 static struct timeval last_model_update_time;
 static float last_avoidance_heading_direction = 0.0f;
 static bool debug = true;
@@ -91,6 +96,26 @@ static void debug_print(const char *format, ...) {
   va_end(args);
 }
 
+// Update the buffer, calculate the weighted average, and return it
+float update_buffer_and_calculate_average(float new_heading) {
+  float weighted_sum = 0.0f;
+  float sum_weights = 0.0f;
+
+  // Add the new value to the buffer
+  buffer_index = (buffer_index + 1) % FILTER_SIZE;
+  heading_buffer[heading_buffer_index] = new_heading;
+
+  // Calculate the weighted sum using the buffer and hardcoded weights
+  for (int i = 0; i < FILTER_SIZE; i++) {
+      weighted_sum += heading_buffer[i] * buffer_weights[i];
+      sum_weights += buffer_weights[i];
+  }
+
+  // Calculate and return the weighted average
+  return weighted_sum / sum_weights;
+}
+
+
 // Callback function for processing model data
 void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
                           unified_model_output_t *output) {
@@ -99,6 +124,7 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
   }
   struct timeval now;
   gettimeofday(&now, NULL);
+
   // debug_print("Received model output from %d at time %u", sender_id, stamp);
   // Handle different model types
   if (output->type == 0) { // Obstacle detection model
@@ -135,8 +161,10 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
       }
     }
 
+
     // Store the latest avoidance direction and update timestamp
-    avoidance_heading_direction = new_avoidance_heading_direction;
+    //avoidance_heading_direction = new_avoidance_heading_direction;
+    avoidance_heading_direction = update_buffer_and_calculate_average(new_avoidance_heading_direction);  // Update heading with weighted average
     last_avoidance_heading_direction = new_avoidance_heading_direction;
     last_model_update_time = now;
   } else if (output->type == 1) { // Border detection model
