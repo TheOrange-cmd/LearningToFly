@@ -66,8 +66,7 @@ DEFINE_DEBUG_PRINT("OBSDET")
 #include "inference.h"     // For running inference
 #include "model.h"         // For model dimensions
 #include "obstacle_detection.h"
-#include "queue.h"        // For processing queue
-#include "video_stream.h" // For streaming functionality
+#include "queue.h" // For processing queue
 
 // Other includes
 #include "mcu_periph/udp.h"
@@ -77,14 +76,6 @@ DEFINE_DEBUG_PRINT("OBSDET")
 #define DEBUG_TAG "OBSDET"
 #define MAX_LOG_LENGTH 256
 
-#ifndef OBSTACLE_FRONT_RTP_PORT
-#define OBSTACLE_FRONT_RTP_PORT 5100
-#endif
-
-#ifndef OBSTACLE_BOTTOM_RTP_PORT
-#define OBSTACLE_BOTTOM_RTP_PORT 5101
-#endif
-
 // static void debug_print(const char* format, ...);
 static struct image_t *front_camera_callback(struct image_t *img,
                                              uint8_t camera_id);
@@ -92,8 +83,8 @@ static struct image_t *bottom_camera_callback(struct image_t *img,
                                               uint8_t camera_id);
 
 // Global variables
-struct obstacle_detection_t obstacle_detection = {
-    .front_enabled = true, .bottom_enabled = true, .stream_enabled = false};
+struct obstacle_detection_t obstacle_detection = {.front_enabled = true,
+                                                  .bottom_enabled = true};
 
 // bool for debug prints
 bool detection_debug = false;
@@ -307,12 +298,8 @@ bool obstacle_detection_init(void) {
   // Initialize mutexes for both cameras
   if (pthread_mutex_init(&front_camera_data.processing.processing_mutex,
                          NULL) != 0 ||
-      pthread_mutex_init(&front_camera_data.streaming.streaming_mutex, NULL) !=
-          0 ||
       pthread_mutex_init(&bottom_camera_data.processing.processing_mutex,
-                         NULL) != 0 ||
-      pthread_mutex_init(&bottom_camera_data.streaming.streaming_mutex, NULL) !=
-          0) {
+                         NULL) != 0) {
     debug_print("Failed to initialize mutexes");
     return false;
   }
@@ -385,39 +372,15 @@ void obstacle_detection_cleanup(void) {
   pthread_join(obstacle_detection.front_processor.thread_id, NULL);
   pthread_join(obstacle_detection.bottom_processor.thread_id, NULL);
 
-  // Free RGB buffers
+  // Free YUV buffers
   free(front_camera_data.processing.yuv_buffer);
   free(bottom_camera_data.processing.yuv_buffer);
   front_camera_data.processing.yuv_buffer = NULL;
   bottom_camera_data.processing.yuv_buffer = NULL;
 
-  // Cleanup front camera resources
-  if (front_camera_data.streaming.frame != NULL) {
-    image_free(front_camera_data.streaming.frame);
-    free(front_camera_data.streaming.frame);
-    front_camera_data.streaming.frame = NULL;
-  }
-  if (front_camera_data.streaming.stream_ctx.img_jpeg.buf != NULL) {
-    image_free(&front_camera_data.streaming.stream_ctx.img_jpeg);
-  }
-  cleanup_stream(&front_camera_data.streaming.stream_ctx);
-
-  // Cleanup bottom camera resources
-  if (bottom_camera_data.streaming.frame != NULL) {
-    image_free(bottom_camera_data.streaming.frame);
-    free(bottom_camera_data.streaming.frame);
-    bottom_camera_data.streaming.frame = NULL;
-  }
-  if (bottom_camera_data.streaming.stream_ctx.img_jpeg.buf != NULL) {
-    image_free(&bottom_camera_data.streaming.stream_ctx.img_jpeg);
-  }
-  cleanup_stream(&bottom_camera_data.streaming.stream_ctx);
-
-  // Destroy all mutexes
+  // Destroy mutexes
   pthread_mutex_destroy(&front_camera_data.processing.processing_mutex);
-  pthread_mutex_destroy(&front_camera_data.streaming.streaming_mutex);
   pthread_mutex_destroy(&bottom_camera_data.processing.processing_mutex);
-  pthread_mutex_destroy(&bottom_camera_data.streaming.streaming_mutex);
 
   // Cleanup inference system
   cleanup_inference();

@@ -15,9 +15,6 @@
         <dl_setting var="obstacle_detection.bottom_enabled" min="0" max="1" step="1" 
               shortname="bottom_enable" module="obstacle_detection"
               values="OFF|ON"/>
-        <dl_setting var="obstacle_detection.stream_enabled" min="0" max="1" step="1" 
-                    shortname="stream_enable" module="obstacle_detection"
-                    values="OFF|ON"/>
         <dl_setting var="detection_debug" min="0" max="1" step="1" 
                     shortname="debug" module="obstacle_detection"
                     values="OFF|ON"/>
@@ -30,7 +27,6 @@
 
   <header>
     <file name="include/obstacle_detection.h"/>
-    <file name="include/video_stream.h"/>
     <file name="include/image_convert.h"/>
     <file name="include/inference.h"/>
     <file name="include/border_model_wrapper.h"/>
@@ -51,24 +47,8 @@
     <define name="BOTTOM_CAMERA_WIDTH" value="240"/>
     <define name="BOTTOM_CAMERA_HEIGHT" value="240"/>
     
-
-    <!-- Include the video streaming dependencies -->
-    <file name="rtp.c" dir="modules/computer_vision/lib/encoding"/>
-
-    <!-- Define the network connection -->
-    <raw>
-      OBSTACLE_FRONT_RTP_PORT ?= 5100
-      OBSTACLE_BOTTOM_RTP_PORT ?= 5101
-      CFLAGS += -DOBSTACLE_FRONT_RTP_PORT=$(OBSTACLE_FRONT_RTP_PORT)
-      CFLAGS += -DOBSTACLE_BOTTOM_RTP_PORT=$(OBSTACLE_BOTTOM_RTP_PORT)
-    </raw>
-
-    <!-- Set port for custom stream -->
-    <define name="OBSTACLE_RTP_PORT_OUT" value="5100"/>
-    
     <!-- Include module source files -->
     <file name="src/obstacle_detection.c"/>
-    <file name="src/video_stream.c"/>
     <file name="src/image_convert.c"/>
     <file name="src/inference.c"/>
     <file name="src/obstacle_model_wrapper.c"/>

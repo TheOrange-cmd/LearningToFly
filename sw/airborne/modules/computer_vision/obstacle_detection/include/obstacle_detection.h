@@ -3,7 +3,6 @@
 
 #include "modules/computer_vision/lib/vision/image.h"
 #include "queue.h"
-#include "video_stream.h"
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -23,7 +22,6 @@ struct processing_thread_t {
 struct obstacle_detection_t {
   bool front_enabled;
   bool bottom_enabled;
-  bool stream_enabled;
   struct processing_thread_t front_processor;
   struct processing_thread_t bottom_processor;
 };
@@ -35,16 +33,8 @@ struct camera_processing_t {
   pthread_mutex_t processing_mutex;
 };
 
-struct camera_streaming_t {
-  bool frame_ready;
-  struct image_t *frame;
-  struct stream_context_t stream_ctx;
-  pthread_mutex_t streaming_mutex;
-};
-
 struct camera_data_t {
   struct camera_processing_t processing;
-  struct camera_streaming_t streaming;
   uint32_t frames_received;
   uint32_t frames_processed;
   struct timeval last_frame_received_time;
