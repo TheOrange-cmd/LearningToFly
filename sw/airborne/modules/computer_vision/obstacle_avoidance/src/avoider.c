@@ -35,8 +35,8 @@ float oag_max_heading_rate = RadOfDeg(60.f);
 float obstacle_weight = 1.0f;
 float floor_weight = 1.0f;
 float danger_threshold = 0.4f;
-float max_danger_treshold = 0.8f;
-float max_max_danger_treshold = 0.9f;
+float max_danger_threshold = 0.8f;
+float max_max_danger_threshold = 0.9f;
 uint8_t obstacle_filter_window = 3;
 uint8_t boundary_filter_window = 1;
 float oag_smoothing_factor = 0.3f;
@@ -100,24 +100,24 @@ static void debug_print(const char *format, ...) {
   va_end(args);
 }
 
-// Function to calculate the smoothed avoidance heading direction
-static float calculate_smoothed_heading(float new_avoidance_heading_direction) {
-  if (!use_heading_history) {
-    return new_avoidance_heading_direction;
-  }
-  // Add the new direction to the history buffer
-  avoidance_heading_history[avoidance_history_index] = new_avoidance_heading_direction;
-  avoidance_history_index = (avoidance_history_index + 1) % AVOIDANCE_HISTORY_SIZE;
+// // Function to calculate the smoothed avoidance heading direction
+// static float calculate_smoothed_heading(float new_avoidance_heading_direction) {
+//   if (!use_heading_history) {
+//     return new_avoidance_heading_direction;
+//   }
+//   // Add the new direction to the history buffer
+//   avoidance_heading_history[avoidance_history_index] = new_avoidance_heading_direction;
+//   avoidance_history_index = (avoidance_history_index + 1) % AVOIDANCE_HISTORY_SIZE;
 
-  // Calculate the average of the values in the buffer
-  float smoothed_heading = 0.0f;
-  for (int i = 0; i < AVOIDANCE_HISTORY_SIZE; i++) {
-    smoothed_heading += avoidance_heading_history[i];
-  }
-  smoothed_heading /= AVOIDANCE_HISTORY_SIZE;
+//   // Calculate the average of the values in the buffer
+//   float smoothed_heading = 0.0f;
+//   for (int i = 0; i < AVOIDANCE_HISTORY_SIZE; i++) {
+//     smoothed_heading += avoidance_heading_history[i];
+//   }
+//   smoothed_heading /= AVOIDANCE_HISTORY_SIZE;
 
-  return smoothed_heading;
-}
+//   return smoothed_heading;
+// }
 
 
 // Callback function for processing model data
@@ -154,12 +154,12 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
     float new_avoidance_heading_direction = 0.0f; // Default: Move forward
     float new_speed_sp = 0.0f;
 
-    if(min_value < max_danger_treshold) {
+    if(min_value < max_danger_threshold) {
       new_speed_sp = MAX(oag_max_speed - MAX(min_value - danger_threshold, 0) * (oag_max_speed - oag_min_speed), oag_min_speed);
       
       debug_print("No direct danger → setting speed to %.2f", new_speed_sp);
     }
-    else if (min_value > max_max_danger_treshold)
+    else if (min_value > max_max_danger_threshold)
     {
       new_speed_sp = - oag_min_speed;
     }
@@ -188,7 +188,7 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
 
     // Store the latest avoidance direction and update timestamp
     speed_sp = new_speed_sp;
-    avoidance_heading_direction = calculate_smoothed_heading(new_avoidance_heading_direction);
+    avoidance_heading_direction = new_avoidance_heading_direction;
     last_model_update_time = now;
     
   } else if (output->type == 1) { // Border detection model
