@@ -34,13 +34,14 @@
 // Initialize parameters with defaults
 float oag_max_speed = 0.3f;
 float oag_min_speed = 0.1f;
+float oag_max_strife_ratio = 0.2f;
 float oag_min_heading_rate = RadOfDeg(20.f);
 float oag_max_heading_rate = RadOfDeg(60.f);
 float obstacle_weight = 1.0f;
 float floor_weight = 1.0f;
-float danger_threshold = 0.4f;
-float max_danger_threshold = 0.8f;
-float max_max_danger_threshold = 0.9f;
+float danger_threshold = 0.7f;
+float speed_danger_threshold = 0.5f;
+float stop_danger_threshold = 0.9f;
 uint8_t obstacle_filter_window = 3;
 uint8_t boundary_filter_window = 1;
 float oag_smoothing_factor = 0.3f;
@@ -49,10 +50,11 @@ float danger_columns[NUM_REGIONS] = {0, 0, 0}; // ⚠️ Updated for 3 regions
 float obstacle_free_confidence = 0;
 
 float speed_sp = 0.0f;
+float speed_strife = 0.0f;
 float avoidance_heading_direction = 0;
 bool use_border_detection = false;
 float border_threshold = 0.5f;
-bool use_heading_history = true;
+bool use_heading_filter = true;
 
 float avoidance_heading_history[AVOIDANCE_HISTORY_SIZE] = {0.0f};
 static int avoidance_history_index = 0;
@@ -201,15 +203,30 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
 
     float new_avoidance_heading_direction = 0.0f; // Default: Move forward
     float new_speed_sp = 0.0f;
+    float new_speed_strife = 0.0f;
+    float strife_ratio = 0.0f;
 
-    if(min_value < max_danger_threshold) {
-      new_speed_sp = MAX(oag_max_speed - MAX(min_value - danger_threshold, 0) * (oag_max_speed - oag_min_speed), oag_min_speed);
+    if (min_value > speed_danger_threshold && min_value < stop_danger_threshold) {
+      // Scale speed between max and min speed
+      new_speed_sp = oag_min_speed + 
+             (oag_max_speed - oag_min_speed) * 
+             (1 - (min_value - speed_danger_threshold) / (stop_danger_threshold - speed_danger_threshold));
       
-      debug_print("No direct danger → setting speed to %.2f", new_speed_sp);
+      // Scale strife ratio between 0 and max strife ratio
+      strife_ratio = oag_max_strife_ratio * 
+             ((min_value - speed_danger_threshold) / (stop_danger_threshold - speed_danger_threshold));
+      
+      debug_print("No direct danger → setting speed to %.2f and strife ratio to %.2f", new_speed_sp, strife_ratio);
     }
-    else if (min_value > max_max_danger_threshold)
+    else if (min_value > stop_danger_threshold)
     {
-      new_speed_sp = - oag_min_speed;
+      new_speed_sp = -oag_min_speed;
+      strife_ratio = -oag_max_strife_ratio;
+    }
+    else
+    {
+      new_speed_sp = oag_max_speed;
+      strife_ratio = 0.0f;
     }
     
 
@@ -218,19 +235,23 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
       if (max_index == 0) {
         debug_print("⚠️ Danger on LEFT → Steering RIGHT");
         new_avoidance_heading_direction = oag_max_heading_rate / 2;
+        new_speed_strife = new_speed_sp * strife_ratio;
       } else if (max_index == 1) {
         // new_avoidance_heading_direction = last_avoidance_heading_direction;
         // debug_print("⚠️ Danger CENTER → Steering like last time");
         if(output->data.obstacle.values[0][0] > output->data.obstacle.values[0][2]) {
           debug_print("⚠️ Danger CENTER → Steering RIGHT");
           new_avoidance_heading_direction = oag_max_heading_rate / 2;
+          new_speed_strife = new_speed_sp * strife_ratio;
         } else {
           debug_print("⚠️ Danger CENTER → Steering LEFT");
           new_avoidance_heading_direction = -oag_max_heading_rate / 2;
+          new_speed_strife = -new_speed_sp * strife_ratio;
         }
       } else {
         debug_print("⚠️ Danger on RIGHT → Steering LEFT");
         new_avoidance_heading_direction = -oag_max_heading_rate / 2;
+        new_speed_strife = - new_speed_sp * strife_ratio;
       }
     }
 
@@ -240,13 +261,17 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
     //avoidance_heading_direction = new_avoidance_heading_direction;
   
     speed_sp = new_speed_sp;
+    speed_strife = new_speed_strife;
     last_avoidance_heading_direction = avoidance_heading_direction;
-    if(!use_heading_history){
+    if(!use_heading_filter){
       avoidance_heading_direction = new_avoidance_heading_direction;
     }
     else{
     avoidance_heading_direction = heading_filter_update(&heading_filter, new_avoidance_heading_direction); //heading buffer filter
     }
+
+    debug_print("\t\t\tAHD: %.2f, SPD: %.2f, STR: %.2f", avoidance_heading_direction, speed_sp, speed_strife);
+
     last_model_update_time = now;
     
   } else if (output->type == 1) { // Border detection model
@@ -260,7 +285,7 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
       if (output->data.border.value > border_threshold) {
         debug_print("⚠️ Border detected - Initiating turnaround");
         navigation_state = OUT_OF_BOUNDS;
-        guidance_h_set_body_vel(-speed_sp, 0);
+        guidance_h_set_body_vel(0, 0);
       }
     }
   }
@@ -340,12 +365,12 @@ void obstacle_avoider_periodic(void) {
                                       cosf(stateGetNedToBodyEulers_f()->psi))) {
         navigation_state = OUT_OF_BOUNDS;
       } else {
-        guidance_h_set_body_vel(speed_sp, 0);
+        guidance_h_set_body_vel(speed_sp, speed_strife);
       }
       guidance_h_set_heading_rate(avoidance_heading_direction);
       break;
     } else {
-      guidance_h_set_body_vel(speed_sp, 0);
+      guidance_h_set_body_vel(speed_sp, speed_strife);
       guidance_h_set_heading_rate(avoidance_heading_direction);
       break;
     }

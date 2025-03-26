@@ -105,14 +105,15 @@
   <!-- Defaults for avoider -->
   <section name="OBSTACLE_AVOIDER" prefix="OAG_">
       <define name="MAX_SPEED" value="0.2"/>
+      <define name="MAX_STRIFE" value="0"/>
       <define name="MIN_HEADING_RATE" value="10" unit="deg/s"/>
       <define name="MAX_HEADING_RATE" value="60" unit="deg/s"/>
       <define name="OBSTACLE_WEIGHT" value="1.0"/>
       <define name="FLOOR_WEIGHT" value="1.0"/>
       <define name="FILTER_WINDOW" value="5"/>
       <define name="DANGER_THRESHOLD" value="0.4"/>
-      <define name="MAX_DANGER_THRESHOLD" value="0.8"/>
-      <define name="MAX_MAX_DANGER_THRESHOLD" value="0.9"/>
+      <define name="SPEED_DANGER_THRESHOLD" value="0.4"/>
+      <define name="STOP_DANGER_THRESHOLD" value="0.9"/>
       <define name="MIN_SPEED" value="0.1"/>
       <define name="BORDER_THRESHOLD" value="0.5"/>
   </section>
