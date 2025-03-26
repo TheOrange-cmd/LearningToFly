@@ -49,6 +49,7 @@ extern struct camera_data_t front_camera_data;
 extern struct camera_data_t bottom_camera_data;
 extern bool detection_debug;
 extern bool detection_debug_model;
+extern bool save_images;
 
 // Function declarations
 bool obstacle_detection_init(void);

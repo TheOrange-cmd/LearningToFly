@@ -63,6 +63,41 @@ void ensure_directory_exists(const char *path) {
 }
 
 /**
+ * @brief Generate a unique filename for saving images
+ *
+ * Creates a filename with timestamp and sequence number to prevent overwriting.
+ *
+ * @param prefix Prefix for the filename (e.g., "front" or "bottom")
+ * @param extension File extension
+ * @return Dynamically allocated string with filename
+ */
+char *generate_unique_filename(const char *prefix, const char *extension) {
+  // Ensure images directory exists
+  ensure_directory_exists("images");
+
+  // Get current timestamp
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+
+  // Use static counter to ensure unique filenames
+  static uint32_t sequence_number = 0;
+  sequence_number++;
+
+  // Allocate buffer for filename
+  char *filename = malloc(256 * sizeof(char));
+  if (!filename) {
+    debug_print("Failed to allocate memory for filename");
+    return NULL;
+  }
+
+  // Create filename with timestamp and sequence number
+  snprintf(filename, 256, "images/%s_%lu_%u.%s", prefix,
+           (unsigned long)tv.tv_sec, sequence_number, extension);
+
+  return filename;
+}
+
+/**
  * @brief Save raw YUV422 image data to file
  *
  * Writes UYVY format data directly to binary file. Handles null pointers

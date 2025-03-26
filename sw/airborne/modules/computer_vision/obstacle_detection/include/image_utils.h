@@ -7,5 +7,6 @@
 void ensure_directory_exists(const char *path);
 void save_yuv_image(const uint8_t *data, int width, int height,
                     const char *filename);
+char *generate_unique_filename(const char *prefix, const char *extension);
 
 #endif // IMAGE_UTILS_H

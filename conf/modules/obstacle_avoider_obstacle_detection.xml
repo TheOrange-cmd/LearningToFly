@@ -27,6 +27,9 @@
         <dl_setting var="detection_debug_model" min="0" max="1" step="1"
                     shortname="debug_model" module="obstacle_detection"
                     values="OFF|ON"/>
+        <dl_setting var="save_images" min="0" max="1" step="1"
+                    shortname="save_images" module="obstacle_detection"
+                    values="OFF|ON"/>
       </dl_settings>
     </dl_settings>
   </settings>

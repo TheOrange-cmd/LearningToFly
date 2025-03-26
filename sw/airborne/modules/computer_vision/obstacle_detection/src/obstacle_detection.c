@@ -79,19 +79,20 @@ DEFINE_DEBUG_PRINT("OBSDET")
 #define DEBUG_TAG "OBSDET"
 #define MAX_LOG_LENGTH 256
 
-// static void debug_print(const char* format, ...);
+// Forward declarations
 static struct image_t *front_camera_callback(struct image_t *img,
                                              uint8_t camera_id);
 static struct image_t *bottom_camera_callback(struct image_t *img,
                                               uint8_t camera_id);
 
-// Global variables
+// Settings to disable processing for each camera (exposed in GCS)
 struct obstacle_detection_t obstacle_detection = {.front_enabled = true,
                                                   .bottom_enabled = true};
 
-// bool for debug prints
+// bools for debug prints
 bool detection_debug = false;
 bool detection_debug_model = true;
+bool save_images = false;
 
 struct camera_data_t front_camera_data = {0};
 struct camera_data_t bottom_camera_data = {0};
@@ -118,6 +119,15 @@ static void *front_processing_thread(void *arg) {
       struct timeval t1, t2, t3;
       gettimeofday(&t1, NULL);
 
+      // Save raw input image if flag is set
+      if (save_images) {
+        char *filename = generate_unique_filename("front_raw", "yuv");
+        if (filename) {
+          save_yuv_image(img->buf, img->w, img->h, filename);
+          free(filename);
+        }
+      }
+
       bool conv_success = convert_uyvy_to_yuv_crop_with_scale(
           img->buf, img->w, img->h, 240, 240,
           front_camera_data.processing.yuv_buffer,
@@ -125,6 +135,15 @@ static void *front_processing_thread(void *arg) {
           240 / FRONT_MODEL_INPUT_SIZE);
 
       if (conv_success) {
+        // Save converted image if flag is set
+        if (save_images) {
+          char *filename = generate_unique_filename("front_converted", "yuv");
+          if (filename) {
+            save_yuv_image((uint8_t *)front_camera_data.processing.yuv_buffer,
+                           240, 240, filename);
+            free(filename);
+          }
+        }
         gettimeofday(&t2, NULL);
         struct model_output_t model_output;
         bool inf_success = run_obstacle_inference(
@@ -281,6 +300,15 @@ static void *bottom_processing_thread(void *arg) {
         gettimeofday(&t1, NULL);
       }
 
+      // Save raw input image if flag is set
+      if (save_images) {
+        char *filename = generate_unique_filename("bottom_raw", "yuv");
+        if (filename) {
+          save_yuv_image(img->buf, img->w, img->h, filename);
+          free(filename);
+        }
+      }
+
       bool conv_success = convert_uyvy_to_yuv_downscale(
           img->buf, img->w, img->h, bottom_camera_data.processing.yuv_buffer,
           bottom_camera_data.processing.yuv_buffer_size,
@@ -290,6 +318,14 @@ static void *bottom_processing_thread(void *arg) {
       }
 
       if (conv_success) {
+        if (save_images) {
+          char *filename = generate_unique_filename("bottom_converted", "yuv");
+          if (filename) {
+            save_yuv_image((uint8_t *)bottom_camera_data.processing.yuv_buffer,
+                           240, 240, filename);
+            free(filename);
+          }
+        }
         struct border_output_t border_output;
         bool inf_success = run_border_inference(
             bottom_camera_data.processing.yuv_buffer, BOTTOM_MODEL_INPUT_SIZE,
