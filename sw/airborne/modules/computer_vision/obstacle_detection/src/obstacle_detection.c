@@ -49,8 +49,8 @@
 #include <stdlib.h>    // For malloc
 #include <string.h>    // For strerror
 #include <sys/stat.h>  // For mkdir and struct stat
+#include <sys/time.h>  // For gettimeofday
 #include <sys/types.h> // For struct stat
-#include <time.h>      // For struct tm
 #include <unistd.h>    // For getcwd
 
 #include "debug_print.h"

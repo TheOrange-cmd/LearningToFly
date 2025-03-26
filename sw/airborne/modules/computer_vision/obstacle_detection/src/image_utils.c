@@ -40,6 +40,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/time.h> // For gettimeofday
+#include <time.h>
 
 DEFINE_DEBUG_PRINT("IMG_UTILS")
 

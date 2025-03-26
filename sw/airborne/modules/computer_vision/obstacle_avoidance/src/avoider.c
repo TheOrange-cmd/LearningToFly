@@ -110,7 +110,6 @@ float avoidance_heading_direction = 0;
 float obstacle_free_confidence = 0; // Confidence in obstacle-free state
 
 float avoidance_heading_history[AVOIDANCE_HISTORY_SIZE] = {0.0f};
-static int avoidance_history_index = 0;
 
 // Heading buffer variables
 typedef struct {
@@ -137,15 +136,13 @@ enum navigation_state_t {
 
 enum navigation_state_t navigation_state = SEARCH_FOR_SAFE_HEADING;
 
+// Event for receiving model outputs
+abi_event ev_model_output;
+
 // Static variables
 static struct filtered_data_t filtered_data = {0};
-abi_event ev_model_output;
 static bool avoider_enabled = false;
-static float latest_floor_value = 0.0f;
-
-// Time logging variables
 static struct timeval start_time;
-static struct timeval current_time;
 
 // Debug configuration
 #define DEBUG_TAG "AVOIDER"
@@ -169,6 +166,13 @@ static void debug_print(const char *format, ...) {
 
   va_end(args);
 }
+
+// Forward declarations to make compiler shut up
+void heading_filter_init(HeadingFilter *filter, uint8_t size,
+                         float *custom_weights);
+float heading_filter_update(HeadingFilter *filter, float new_value);
+void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
+                          unified_model_output_t *output);
 
 // heading buffer filter
 void heading_filter_init(HeadingFilter *filter, uint8_t size,

@@ -11,9 +11,9 @@
 static inline void debug_print_tag(const char *tag, const char *format, ...) {
   va_list args;
   va_start(args, format);
-  char buffer[MAX_LOG_LENGTH];
 
 #ifdef TARGET_AP
+  char buffer[MAX_LOG_LENGTH];
   vsnprintf(buffer, sizeof(buffer), format, args);
   char command[MAX_LOG_LENGTH + 32];
   snprintf(command, sizeof(command), "ulogger -t %s '%s'", tag, buffer);
