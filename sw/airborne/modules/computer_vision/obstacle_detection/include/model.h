@@ -3,7 +3,7 @@
 #define MODEL_SPECS_H
 
 // Input specifications
-#define FRONT_MODEL_INPUT_SIZE 60
+#define FRONT_MODEL_INPUT_SIZE 240
 #define BOTTOM_MODEL_INPUT_SIZE 30
 
 // Output specifications

@@ -59,10 +59,10 @@ inline void setGuided(void){
       !(nav_block >= IndexOfBlock('land here')) @AND
       (autopilot_in_flight() == true) )" deroute="land here"/>
     <!-- Geofencing XY -->
-    <exception cond="(!InsideCyberZoo(GetPosX(), GetPosY()) @AND
+    <!-- <exception cond="(!InsideCyberZoo(GetPosX(), GetPosY()) @AND
       !(IndexOfBlock('Holding point') @GT nav_block) @AND
       !(nav_block >= IndexOfBlock('land here')) @AND
-      (autopilot_in_flight() == true) )" deroute="land here"/>
+      (autopilot_in_flight() == true) )" deroute="land here"/> -->
     <!-- Geofencing Z 2.5 -->
     <exception cond="((GetPosAlt() @GT 3.5) @AND
       !(IndexOfBlock('Holding point') @GT nav_block) @AND

@@ -260,7 +260,7 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
       if (output->data.border.value > border_threshold) {
         debug_print("⚠️ Border detected - Initiating turnaround");
         navigation_state = OUT_OF_BOUNDS;
-        guidance_h_set_body_vel(-speed_sp, 0);
+        guidance_h_set_body_vel(0, 0);
       }
     }
   }

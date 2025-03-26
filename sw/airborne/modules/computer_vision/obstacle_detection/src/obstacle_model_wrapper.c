@@ -37,5 +37,5 @@
 #include "obstacle_model_wrapper.h"
 #include <stdio.h>
 #define entry entry_obstacle
-#include "models/front_model.c"
+#include "models/model_small.c"
 #undef entry
