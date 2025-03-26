@@ -26,6 +26,10 @@
 #define NUM_REGIONS 3         // ⚠️ Changed from 5 → 3 danger columns
 #define SMOOTHING_FACTOR 0.3f // For trend calculation
 
+#define MAX_FILTER_SIZE 30 //for the heading buffer filter
+#define DEFAULT_FILTER_SIZE 5
+
+
 // Initialize parameters with defaults
 float oag_max_speed = 0.3f;
 float oag_min_speed = 0.1f;
@@ -44,10 +48,17 @@ float avoidance_heading_direction = 0;
 bool use_border_detection = false;
 float border_threshold = 0.5f;
 
-uint8_t filter_size = 5;
-float heading_buffer[filter_size];
-uint8_t buffer_index = 0;
-float buffer_weights[filter_size] = {5, 4, 3, 2, 1}; //Linear weight for buffer, most recent weighs most
+//Heading buffer variables
+typedef struct {
+  float buffer[MAX_FILTER_SIZE]; 
+  float weights[MAX_FILTER_SIZE]; 
+  uint8_t max_size;
+  uint8_t current_size;
+  uint8_t index;
+} HeadingFilter;
+
+HeadingFilter heading_filter;
+
 
 static struct timeval last_model_update_time;
 static float last_avoidance_heading_direction = 0.0f;
@@ -96,23 +107,53 @@ static void debug_print(const char *format, ...) {
   va_end(args);
 }
 
-// Update the buffer, calculate the weighted average, and return it
-float update_buffer_and_calculate_average(float new_heading) {
+//heading buffer filter
+void heading_filter_init(HeadingFilter *filter, uint8_t size, float *custom_weights) {
+  filter->max_size = (size > MAX_FILTER_SIZE) ? MAX_FILTER_SIZE : size;
+  filter->current_size = 0;
+  filter->index = 0;
+
+  if (custom_weights) {
+      memcpy(filter->weights, custom_weights, sizeof(float) * filter->max_size);
+  } else {
+      float sum_weights = 0.0f;
+      for (uint8_t i = 0; i < filter->max_size; i++) {
+          filter->weights[i] = expf(-0.3f * i);  // Exponential decay
+          sum_weights += filter->weights[i];
+      }
+      // Normalize weights
+      for (uint8_t i = 0; i < filter->max_size; i++) {
+          filter->weights[i] /= sum_weights;
+      }
+  }
+  
+  memset(filter->buffer, 0, sizeof(float) * MAX_FILTER_SIZE);
+}
+
+
+float heading_filter_update(HeadingFilter *filter, float new_value) {
+  filter->buffer[filter->index] = new_value;
+  
   float weighted_sum = 0.0f;
-  float sum_weights = 0.0f;
+  float weight_sum = 0.0f;
+  uint8_t active_size = (filter->current_size < filter->max_size) 
+                         ? filter->current_size 
+                         : filter->max_size;
 
-  // Add the new value to the buffer
-  buffer_index = (buffer_index + 1) % FILTER_SIZE;
-  heading_buffer[heading_buffer_index] = new_heading;
-
-  // Calculate the weighted sum using the buffer and hardcoded weights
-  for (int i = 0; i < FILTER_SIZE; i++) {
-      weighted_sum += heading_buffer[i] * buffer_weights[i];
-      sum_weights += buffer_weights[i];
+  for (uint8_t i = 0; i < active_size; i++) {
+      uint8_t buf_index = (filter->index - i + filter->max_size) % filter->max_size;
+      weighted_sum += filter->buffer[buf_index] * filter->weights[i];
+      weight_sum += filter->weights[i];
   }
 
-  // Calculate and return the weighted average
-  return weighted_sum / sum_weights;
+  filter->index = (filter->current_size < filter->max_size) ? filter->current_size++ : (filter->index + 1) % filter->max_size;
+  if (filter->current_size < filter->max_size) {
+      filter->current_size++;
+  }
+
+  if (weight_sum == 0) return new_value; // Avoid division by zero
+
+  return weighted_sum / weight_sum;
 }
 
 
@@ -164,7 +205,7 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
 
     // Store the latest avoidance direction and update timestamp
     //avoidance_heading_direction = new_avoidance_heading_direction;
-    avoidance_heading_direction = update_buffer_and_calculate_average(new_avoidance_heading_direction);  // Update heading with weighted average
+    avoidance_heading_direction = heading_filter_update(&heading_filter, new_avoidance_heading_direction); //heading buffer filter
     last_avoidance_heading_direction = new_avoidance_heading_direction;
     last_model_update_time = now;
   } else if (output->type == 1) { // Border detection model
@@ -185,6 +226,9 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
 }
 
 void obstacle_avoider_init(void) {
+  heading_filter_init(&heading_filter, DEFAULT_FILTER_SIZE, NULL);  // Initialize buffer
+
+
   // Initialize structure
   filtered_data.current_index = 0;
   filtered_data.rows = 0;
