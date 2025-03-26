@@ -25,15 +25,14 @@
             <dl_setting var="floor_weight" min="0.0" step="0.1" max="2.0" shortname="floor_weight" module="obstacle_avoider_avoider" param="FLOOR_WEIGHT"/>
             <!-- Thresholds -->
             <dl_setting var="danger_threshold" min="0.0" step="0.1" max="1.0" shortname="danger_thresh" module="obstacle_avoider_avoider"/>
-            <dl_setting var="max_danger_threshold" min="0.0" step="0.1" max="1.0" shortname="max_danger_thresh" module="obstacle_avoider_avoider"/>
-            <dl_setting var="max_max_danger_threshold" min="0.0" step="0.1" max="1.2" shortname="max_max_danger_thresh" module="obstacle_avoider_avoider"/>
+            <dl_setting var="stop_danger_threshold" min="0.0" step="0.1" max="1.2" shortname="stop_danger_thresh" module="obstacle_avoider_avoider"/>
             <!-- Filter settings -->
             <dl_setting var="obstacle_filter_window" min="1" step="1" max="10" shortname="obs_filt"/>
             <dl_setting var="boundary_filter_window" min="1" step="1" max="5" shortname="bound_filt"/>
             <dl_setting var="oag_smoothing_factor" min="0.0" step="0.05" max="1.0" shortname="smooth"/>
             <dl_setting var="oag_trend_weight" min="0.0" step="0.1" max="2.0" shortname="trend_w"/>
-            <dl_setting var="use_heading_history" min="0" max="1" step="1" 
-                shortname="use_heading_history" module="obstacle_avoider_avoider"
+            <dl_setting var="use_filter_heading" min="0" max="1" step="1" 
+                shortname="use_filter_heading" module="obstacle_avoider_avoider"
                 values="OFF|ON"/>
         </dl_settings>
     </dl_settings>

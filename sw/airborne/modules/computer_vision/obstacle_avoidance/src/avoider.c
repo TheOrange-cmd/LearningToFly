@@ -39,8 +39,7 @@ float oag_max_heading_rate = RadOfDeg(60.f);
 float obstacle_weight = 1.0f;
 float floor_weight = 1.0f;
 float danger_threshold = 0.4f;
-float max_danger_threshold = 0.8f;
-float max_max_danger_threshold = 0.9f;
+float stop_danger_threshold = 0.9f;
 uint8_t obstacle_filter_window = 3;
 uint8_t boundary_filter_window = 1;
 float oag_smoothing_factor = 0.3f;
@@ -202,12 +201,12 @@ void myModelOutputHandler(uint8_t sender_id, uint32_t stamp,
     float new_avoidance_heading_direction = 0.0f; // Default: Move forward
     float new_speed_sp = 0.0f;
 
-    if(min_value < max_danger_threshold) {
+    if(min_value < danger_threshold) {
       new_speed_sp = MAX(oag_max_speed - MAX(min_value - danger_threshold, 0) * (oag_max_speed - oag_min_speed), oag_min_speed);
       
       debug_print("No direct danger → setting speed to %.2f", new_speed_sp);
     }
-    else if (min_value > max_max_danger_threshold)
+    else if (min_value > stop_danger_threshold)
     {
       new_speed_sp = - oag_min_speed;
     }

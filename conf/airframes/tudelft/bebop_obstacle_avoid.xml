@@ -111,8 +111,7 @@
       <define name="FLOOR_WEIGHT" value="1.0"/>
       <define name="FILTER_WINDOW" value="5"/>
       <define name="DANGER_THRESHOLD" value="0.4"/>
-      <define name="MAX_DANGER_THRESHOLD" value="0.8"/>
-      <define name="MAX_MAX_DANGER_THRESHOLD" value="0.9"/>
+      <define name="STOP_DANGER_THRESHOLD" value="0.9"/>
       <define name="MIN_SPEED" value="0.1"/>
       <define name="BORDER_THRESHOLD" value="0.5"/>
   </section>
