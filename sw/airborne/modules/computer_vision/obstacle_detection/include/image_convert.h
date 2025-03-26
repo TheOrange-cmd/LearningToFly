@@ -6,14 +6,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// bool convert_uyvy_to_yuv_crop(const uint8_t* uyvy_data,
-//     int orig_width,
-//     int orig_height,
-//     int crop_width,
-//     int crop_height,
-//     float* yuv_buffer,
-//     size_t buffer_size);
-
 bool convert_uyvy_to_yuv_downscale(const uint8_t *uyvy_data, int width,
                                    int height, float *yuv_buffer,
                                    size_t buffer_size, int downscale_factor);

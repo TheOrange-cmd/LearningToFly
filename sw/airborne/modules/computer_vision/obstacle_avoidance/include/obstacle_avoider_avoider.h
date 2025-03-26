@@ -14,18 +14,11 @@
 // Tunable parameters (with defaults)
 extern float oag_max_speed;
 extern float oag_min_speed;
-extern float oag_max_strife_ratio;
-extern float oag_min_heading_rate;
+extern float oag_max_strafe_ratio;
 extern float oag_max_heading_rate;
-extern float obstacle_weight;
-extern float floor_weight;
-extern uint8_t obstacle_filter_window;
-extern uint8_t boundary_filter_window;
 extern float danger_threshold;
 extern float speed_danger_threshold;
 extern float stop_danger_threshold;
-extern float oag_smoothing_factor;
-extern float oag_trend_weight;
 extern bool use_border_detection;
 extern float border_threshold;
 extern bool use_heading_filter;

@@ -4,11 +4,15 @@
     <description>
       Obstacle detection module for the TU Delft Autonomous MAV course. The module uses two small CNNs to 
       detect obstacles in the front camera image and the boundary of the Cyberzoo testing environment in the bottom camera image. 
-      The bottom camera CNN is trained using a small amount of manually labeled data and some augmented data using brightness, contrast, and small rotations.
-      The front camera CNN is trained using a large amount of data generated with MiDaS (https://arxiv.org/abs/1907.01341), an open-source monocular depth estimation model. 
-      The data from MiDaS is converted to a simple danger value for three columns in the cropped center square of the image to allow inference with a small CNN.
+      The bottom camera CNN is trained using a small amount of manually labeled data and some augmented 
+      data using brightness, contrast, and small rotations.
+      The front camera CNN is trained using a large amount of image-depth frame pairs generated 
+      using MiDaS (https://arxiv.org/abs/1907.01341), an open-source monocular depth estimation model. 
+      The data from MiDaS is converted to a simple danger value for three columns in the cropped 
+      center square of the image to allow inference with a small CNN.
       Each column can have a value of 0-1, where 0 is safe and 1 is dangerous. The CNN is trained to predict the danger value for each column.
-      The CNNs are trained using the PyTorch framework and converted to ONNX format, and then to C using ONNX2C.
+      The CNNs are trained using the PyTorch framework and converted to ONNX format, and then to pure C using ONNX2C to allow 
+      inference without the use of external libraries like TFLite, to avoid cross-compilation issues.
     </description>
   </doc>
 
@@ -80,8 +84,8 @@
   </makefile>
   <makefile target="ap">
       <!-- Real hardware specific stuff -->
-      <configure name="VISION_LED" value="5"/>
-      <define name="CAMERA_CAPTURE_MODE" value="1"/>
+      <!-- <configure name="VISION_LED" value="5"/> -->
+      <!-- <define name="CAMERA_CAPTURE_MODE" value="1"/> -->
 
       <!-- Add explicit dependencies -->
       <raw>

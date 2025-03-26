@@ -26,6 +26,7 @@
 /**
  * @file
  * sw/airborne/modules/computer_vision/obstacle_detection/src/image_utils.c
+ *
  * @brief Functions to save images to disk. Note that saving images is slow,
  * only use for debugging purposes or for collecting training data.
  *

@@ -26,6 +26,7 @@
 /**
  * @file
  * sw/airborne/modules/computer_vision/obstacle_detection/src/obstacle_detection.c
+ *
  * Main file for the sensing part of the two part module for obstacle detection
  * and avoidance for the TU Delft Autonomous MAV course.
  *
@@ -41,16 +42,16 @@
  */
 
 // Standard includes
-#include <errno.h> // For errno
-#include <pthread.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <errno.h>     // For errno
+#include <pthread.h>   // For pthreads and mutexes
+#include <stdbool.h>   // For bool type
+#include <stdio.h>     // For printf
+#include <stdlib.h>    // For malloc
 #include <string.h>    // For strerror
 #include <sys/stat.h>  // For mkdir and struct stat
 #include <sys/types.h> // For struct stat
-#include <time.h>
-#include <unistd.h> // For getcwd
+#include <time.h>      // For struct tm
+#include <unistd.h>    // For getcwd
 
 #include "debug_print.h"
 DEFINE_DEBUG_PRINT("OBSDET")
@@ -64,14 +65,14 @@ DEFINE_DEBUG_PRINT("OBSDET")
 #include "modules/core/abi.h"
 
 // Project includes
-#include "image_convert.h" // For YUV to RGB conversion
-#include "image_utils.h"   // For image saving
-#include "inference.h"     // For running inference
-#include "model.h"         // For model dimensions
-#include "obstacle_detection.h"
-#include "queue.h" // For processing queue
+#include "image_convert.h"      // For YUV to RGB conversion
+#include "image_utils.h"        // For image saving
+#include "inference.h"          // For running inference
+#include "model.h"              // For model dimensions
+#include "obstacle_detection.h" // For structs and function declarations
+#include "queue.h"              // For processing queue
 
-// Other includes
+// ABI message includes
 #include "mcu_periph/udp.h"
 #include "udp_socket.h"
 
@@ -89,11 +90,12 @@ static struct image_t *bottom_camera_callback(struct image_t *img,
 struct obstacle_detection_t obstacle_detection = {.front_enabled = true,
                                                   .bottom_enabled = true};
 
-// bools for debug prints
+// bools for debug prints and image saving (exposed in GCS)
 bool detection_debug = false;
 bool detection_debug_model = true;
 bool save_images = false;
 
+// Camera data structures
 struct camera_data_t front_camera_data = {0};
 struct camera_data_t bottom_camera_data = {0};
 static struct video_listener *front_video_listener = NULL;

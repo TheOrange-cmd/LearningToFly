@@ -26,6 +26,7 @@
 /**
  * @file
  * sw/airborne/modules/computer_vision/obstacle_detection/src/queue.c
+ *
  * @brief Queue functions for vision processing
  *
  * @note Developement assisted by Claude Sonnet 3.5

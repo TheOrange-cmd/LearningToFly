@@ -26,6 +26,7 @@
 /**
  * @file
  * sw/airborne/modules/computer_vision/obstacle_detection/src/image_utils.c
+ *
  * @brief Functions used for image preprocessing for model inference,
  * prioritizing speed over avoiding code duplication.
  *
