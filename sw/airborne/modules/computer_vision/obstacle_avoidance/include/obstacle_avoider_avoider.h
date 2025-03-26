@@ -21,10 +21,13 @@ extern float floor_weight;
 extern uint8_t obstacle_filter_window;
 extern uint8_t boundary_filter_window;
 extern float danger_threshold;
+extern float max_danger_threshold;
+extern float max_max_danger_threshold;
 extern float oag_smoothing_factor;
 extern float oag_trend_weight;
 extern bool use_border_detection;
 extern float border_threshold;
+extern bool use_heading_history;
 
 // Structure for filtered data
 struct filtered_data_t {
