@@ -366,7 +366,7 @@ static void *bottom_processing_thread(void *arg) {
 }
 
 /**
- * @brief Initialize obstacle detection module
+ * @brief Initialize the obstacle detection module
  *
  * Starts processing threads, initializes synchronization primitives,
  * allocates image buffers, registers camera callbacks, and initializes
