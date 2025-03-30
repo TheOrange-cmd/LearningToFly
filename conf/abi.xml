@@ -257,16 +257,14 @@
       <field name="data" type="uint8_t*">pointer to the data of the matrix</field>
     </message>
 
-    <message name="MODELDATA" id="38">
-      <field name="output_type" type="uint8_t">Type of model output (0: obstacle, 1: border)</field>
-      <field name="rows" type="uint8_t">Number of rows in output</field>
-      <field name="cols" type="uint8_t">Number of columns in output</field>
-      <field name="values" type="float *">Array of output values</field>
+    <message name="MODELOUTPUT" id="38">
+      <field name="stamp" type="uint32_t" unit="us">Timestamp </field>
+      <field name="values" type="struct model_output_t ">Output value(s)</field>
     </message>
 
-    <message name="FLOORDATA" id="39">
+    <!-- <message name="FLOORDATA" id="39">
       <field name="danger_value" type="float">Floor detection danger value</field>
-    </message>
+    </message>  -->
 
   </msg_class>
 

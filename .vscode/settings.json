@@ -24,7 +24,9 @@
         "utility": "c",
         "variant": "c",
         "string.h": "c",
-        "thread": "c"
+        "thread": "c",
+        "tensor": "cpp",
+        "stdio.h": "c"
     },
     "C_Cpp.dimInactiveRegions": false,
     "esbonio.sphinx.confDir": "",

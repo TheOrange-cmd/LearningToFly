@@ -2,7 +2,17 @@
 <module name="obstacle_avoider_obstacle_detection" dir="computer_vision/obstacle_detection">
   <doc>
     <description>
-      Simple grid-based obstacle detection using ONNX2C model
+      Obstacle detection module for the TU Delft Autonomous MAV course. The module uses two small CNNs to 
+      detect obstacles in the front camera image and the boundary of the Cyberzoo testing environment in the bottom camera image. 
+      The bottom camera CNN is trained using a small amount of manually labeled data and some augmented 
+      data using brightness, contrast, and small rotations.
+      The front camera CNN is trained using a large amount of image-depth frame pairs generated 
+      using MiDaS (https://arxiv.org/abs/1907.01341), an open-source monocular depth estimation model. 
+      The data from MiDaS is converted to a simple danger value for three columns in the cropped 
+      center square of the image to allow inference with a small CNN.
+      Each column can have a value of 0-1, where 0 is safe and 1 is dangerous. The CNN is trained to predict the danger value for each column.
+      The CNNs are trained using the PyTorch framework and converted to ONNX format, and then to pure C using ONNX2C to allow 
+      inference without the use of external libraries like TFLite, to avoid cross-compilation issues.
     </description>
   </doc>
 
@@ -15,8 +25,14 @@
         <dl_setting var="obstacle_detection.bottom_enabled" min="0" max="1" step="1" 
               shortname="bottom_enable" module="obstacle_detection"
               values="OFF|ON"/>
-        <dl_setting var="obstacle_detection.stream_enabled" min="0" max="1" step="1" 
-                    shortname="stream_enable" module="obstacle_detection"
+        <dl_setting var="detection_debug" min="0" max="1" step="1" 
+                    shortname="debug" module="obstacle_detection"
+                    values="OFF|ON"/>
+        <dl_setting var="detection_debug_model" min="0" max="1" step="1"
+                    shortname="debug_model" module="obstacle_detection"
+                    values="OFF|ON"/>
+        <dl_setting var="save_images" min="0" max="1" step="1"
+                    shortname="save_images" module="obstacle_detection"
                     values="OFF|ON"/>
       </dl_settings>
     </dl_settings>
@@ -24,7 +40,6 @@
 
   <header>
     <file name="include/obstacle_detection.h"/>
-    <file name="include/video_stream.h"/>
     <file name="include/image_convert.h"/>
     <file name="include/inference.h"/>
     <file name="include/border_model_wrapper.h"/>
@@ -45,24 +60,8 @@
     <define name="BOTTOM_CAMERA_WIDTH" value="240"/>
     <define name="BOTTOM_CAMERA_HEIGHT" value="240"/>
     
-
-    <!-- Include the video streaming dependencies -->
-    <file name="rtp.c" dir="modules/computer_vision/lib/encoding"/>
-
-    <!-- Define the network connection -->
-    <raw>
-      OBSTACLE_FRONT_RTP_PORT ?= 5100
-      OBSTACLE_BOTTOM_RTP_PORT ?= 5101
-      CFLAGS += -DOBSTACLE_FRONT_RTP_PORT=$(OBSTACLE_FRONT_RTP_PORT)
-      CFLAGS += -DOBSTACLE_BOTTOM_RTP_PORT=$(OBSTACLE_BOTTOM_RTP_PORT)
-    </raw>
-
-    <!-- Set port for custom stream -->
-    <define name="OBSTACLE_RTP_PORT_OUT" value="5100"/>
-    
     <!-- Include module source files -->
     <file name="src/obstacle_detection.c"/>
-    <file name="src/video_stream.c"/>
     <file name="src/image_convert.c"/>
     <file name="src/inference.c"/>
     <file name="src/obstacle_model_wrapper.c"/>
@@ -85,8 +84,8 @@
   </makefile>
   <makefile target="ap">
       <!-- Real hardware specific stuff -->
-      <configure name="VISION_LED" value="5"/>
-      <define name="CAMERA_CAPTURE_MODE" value="1"/>
+      <!-- <configure name="VISION_LED" value="5"/> -->
+      <!-- <define name="CAMERA_CAPTURE_MODE" value="1"/> -->
 
       <!-- Add explicit dependencies -->
       <raw>

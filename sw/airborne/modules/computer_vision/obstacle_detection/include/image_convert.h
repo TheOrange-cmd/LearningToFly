@@ -1,42 +1,19 @@
 #ifndef IMAGE_CONVERT_H
 #define IMAGE_CONVERT_H
 
-#include <stdint.h>
+#include <math.h>
 #include <stdbool.h>
-#include <stddef.h> 
-#include <math.h>    
+#include <stddef.h>
+#include <stdint.h>
 
-// Initialize the YUV to RGB conversion lookup tables
-bool init_yuv_conversion(void);
+bool convert_uyvy_to_yuv_downscale(const uint8_t *uyvy_data, int width,
+                                   int height, float *yuv_buffer,
+                                   size_t buffer_size, int downscale_factor);
 
-// Get required buffer size for RGB conversion
-size_t get_rgb_buffer_size(int width, int height);
-
-// Convert functions that take pre-allocated buffer
-bool convert_uyvy_to_rgb_front(const uint8_t* uyvy_data, 
-    int width, 
-    int height, 
-    float* rgb_buffer,
-    size_t buffer_size);
-
-bool convert_uyvy_to_rgb_bottom(const uint8_t* uyvy_data, 
-    int width, 
-    int height, 
-    float* rgb_buffer,
-    size_t buffer_size);
-
-bool convert_uyvy_to_yuv_crop(const uint8_t* uyvy_data,
-    int orig_width,
-    int orig_height,
-    int crop_width,
-    int crop_height,
-    float* yuv_buffer,
-    size_t buffer_size);
-
-bool convert_uyvy_to_yuv_downscale(const uint8_t* uyvy_data, 
-    int width, 
-    int height,
-    float* yuv_buffer,
-    size_t buffer_size, int downscale_factor);
+bool convert_uyvy_to_yuv_crop_with_scale(const uint8_t *uyvy_data,
+                                         int orig_width, int orig_height,
+                                         int crop_width, int crop_height,
+                                         float *yuv_buffer, size_t buffer_size,
+                                         int scale_factor);
 
 #endif // IMAGE_CONVERT_H
