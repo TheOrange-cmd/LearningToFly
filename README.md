@@ -1,6 +1,6 @@
 # MAIN README
 
-Welcome to the repository of 'Embedded Monocular Obstacle Avoidance in MAVs Using Extreme Knowledge Distillation' by D.J. Rugge, T.M. van Dam, M. Frans, W. van Mildert, T.B.M. van Santen, J. Slagmolen. This repository is a fork of the specially prepared fork of the paparazzi UAV project for the MSc course 'AE4317 - Autonomous Flight of Micro Air Vehicles' at the TU Delft. For an overview of paparazzi, the MAVlab fork, and the course, the reader is referred to the course manual, found on https://tudelft.github.io/coursePaparazzi/. 
+Welcome to the repository of 'Embedded Monocular Obstacle Avoidance in MAVs Using Extreme Knowledge Distillation' by D.J. Rugge, T.M. van Dam, M. Frans, W. van Mildert, T.B.M. van Santen, J. Slagmolen. This repository is a fork of the specially prepared fork of the paparazzi UAV project for the MSc course 'AE4317 - Autonomous Flight of Micro Air Vehicles' at the TU Delft. For an overview of paparazzi, the MAVlab fork, and the course, the reader is referred to the course manual, found on https://tudelft.github.io/coursePaparazzi/. Our module showed great flying speeds, winning the distance competition by 100 meters compared to the runner-up, but also caused significant collisions. Further testing is required to find the exact point of failure - whether it stems from the sensing, the steering, or both! 
 
 Our contributions to this fork can be found in the following folders/files:
 
