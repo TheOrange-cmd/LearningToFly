@@ -1,3 +1,11 @@
+'''
+This script loads an ONNX model and a dataset of images with danger values,
+and compares the true danger values with the predictions made by the model. It visualizes the results in a dashboard format, allowing for easy comparison of true vs predicted values.
+While the comparison is not strictly valid because we are comparing predictions with the same images used for training, it is a useful debugging tool to check if the model is working correctly. I find in early tests that when training with just MSE, the small model architecture would simply learn the mean of the training set, which is not useful. I solved this by using the huber loss instead. 
+
+Author: Daniel Rugge (2025), assisted by Claude Sonnet 3.5
+''' 
+
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2

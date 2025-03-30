@@ -287,3 +287,6 @@ utils/model_benchmark_results_20250324_142852/benchmark_summary.txt
 /FrontCamDetector/promising_models
 >>>>>>> Stashed changes
 /FrontCamDetector/preprocessed_labels
+/FrontCamDetector/clean_dataset
+/FrontCamDetector/danger_labels
+/FrontCamDetector/danger_labels
