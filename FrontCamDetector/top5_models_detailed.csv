@@ -1,0 +1,6 @@
+Model,Input,Params,Architecture,Conv Channels,FC Size,Efficient,Dropout,Augment,Rotations,Inference (ms),Huber Loss,MAE,Efficiency
+model_5,60,"210,273",small_pyramid,8-16-32,128,True,0.1,True,2,17.98,0.00822,0.121,87.17
+model_1,60,"103,585",tiny_deep,8-16-32,64,True,0.1,True,2,13.33,0.00931,0.133,74.48
+model_5,120,"931,169",small_pyramid,8-16-32,128,True,0.1,True,2,78.69,0.00821,0.121,73.14
+model_1,120,"464,033",tiny_deep,8-16-32,64,True,0.1,True,2,65.54,0.00888,0.129,65.22
+model_3,60,"53,377",micro_uniform,16-16-16,64,True,0.2,True,2,19.06,0.00998,0.141,61.47

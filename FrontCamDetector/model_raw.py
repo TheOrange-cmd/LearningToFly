@@ -11,13 +11,15 @@ class ObstacleDetector(nn.Module):
         channels = config['conv_channels']
         fc_size = config['fc_size']
         dropout_rate = config['dropout_rate']
-        self.input_size = 120 // config['downscale_factor']
         self.use_efficient = config.get('use_efficient', False)  # New flag for efficient convolutions
         
-        # Calculate sizes after each pooling layer
-        size_after_pool1 = self.input_size // 2
-        size_after_pool2 = size_after_pool1 // 2
-        size_after_pool3 = size_after_pool2 // 2
+        # Proper input size calculation
+        self.input_size = 240 // config['downscale_factor']
+        channels = config['conv_channels']
+        
+        # Calculate final feature map size
+        size_after_conv = self.input_size // (2 ** 3)  # After 3 pooling layers
+        self.flat_size = channels[-1] * size_after_conv * size_after_conv
         
         if self.use_efficient:
             # Depthwise separable convolutions
@@ -58,9 +60,6 @@ class ObstacleDetector(nn.Module):
             self.relu3 = nn.ReLU()
             self.pool3 = nn.MaxPool2d(2)
         
-        # Calculate flattened size
-        self.flat_size = channels[2] * size_after_pool3 * size_after_pool3
-        
         # Use more efficient FC layers with intermediate squeeze
         if self.use_efficient:
             self.classifier = nn.Sequential(
@@ -70,16 +69,14 @@ class ObstacleDetector(nn.Module):
                 # Additional squeeze layer
                 nn.Linear(fc_size, fc_size // 2),
                 nn.ReLU(),
-                nn.Linear(fc_size // 2, 5),  # Output 5 values
-                nn.Sigmoid()  # Sigmoid to ensure output is between 0 and 1
+                nn.Linear(fc_size // 2, 3),  # Output 3 values
             )
         else:
             # Original FC layers
             self.fc1 = nn.Linear(self.flat_size, fc_size)
             self.relu4 = nn.ReLU()
             self.dropout = nn.Dropout(dropout_rate)
-            self.fc2 = nn.Linear(fc_size, 5)  # Output 5 values
-            self.sigmoid = nn.Sigmoid()  # Sigmoid to ensure output is between 0 and 1
+            self.fc2 = nn.Linear(fc_size, 3)  # Output 3 values
 
         # Initialize weights
         self._initialize_weights()
@@ -95,19 +92,36 @@ class ObstacleDetector(nn.Module):
                 nn.init.zeros_(m.bias)
     
     def forward(self, x):
+        if self.debug_mode:
+            print(f"Input shape: {x.shape}")
+            
         if self.use_efficient:
             x = self.conv1(x)
+            if self.debug_mode: print(f"After conv1: {x.shape}")
             x = self.conv2(x)
+            if self.debug_mode: print(f"After conv2: {x.shape}")
             x = self.conv3(x)
-            x = x.view(-1, self.flat_size)
-            x = self.classifier(x)
+            if self.debug_mode: print(f"After conv3: {x.shape}")
         else:
             x = self.pool1(self.relu1(self.conv1(x)))
+            if self.debug_mode: print(f"After conv1: {x.shape}")
             x = self.pool2(self.relu2(self.conv2(x)))
+            if self.debug_mode: print(f"After conv2: {x.shape}")
             x = self.pool3(self.relu3(self.conv3(x)))
-            x = x.view(-1, self.flat_size)
-            x = self.dropout(self.relu4(self.fc1(x)))
-            x = self.sigmoid(self.fc2(x))
+            if self.debug_mode: print(f"After conv3: {x.shape}")
+        
+        x = x.view(-1, self.flat_size)
+        
+        # Add the missing classification layers
+        if self.use_efficient:
+            x = self.classifier(x)
+        else:
+            x = self.relu4(self.fc1(x))
+            x = self.dropout(x)
+            x = self.fc2(x)
+        
+        if self.debug_mode:
+            print(f"Final output shape: {x.shape}")
         return x
 
     def count_parameters(self):

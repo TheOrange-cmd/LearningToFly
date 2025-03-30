@@ -4,36 +4,228 @@ import os
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from label_generator import danger_level
+# from label_generator import danger_level
 import h5py  
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 class DangerDataset(Dataset):
-    def __init__(self, h5_path, downscale_factor=2):
+    def __init__(self, h5_path, downscale_factor=2, training=True, debug=False):
         super().__init__()
         self.downscale_factor = downscale_factor
+        self.training = training
         
         with h5py.File(h5_path, 'r') as f:
-            self.image_paths = [x.decode() for x in f['image_paths']]
-            self.labels = f['danger_values'][:]
-            
+            self.preprocessed_images = f['preprocessed_images'][:]  # Shape: (N, 3, 240, 240)
+            self.danger_values = f['danger_values'][:]  # Shape: (N, 5)
+        
+        self.valid_indices = list(range(len(self.preprocessed_images)))
+        if debug:
+            self.valid_indices = self.valid_indices[:100]
+        
+        self.calculate_label_statistics()
+    
+    def calculate_label_statistics(self):
+        """Calculate statistics of danger values for potential weighting"""
+        values = self.danger_values[self.valid_indices]
+        self.label_mean = np.mean(values)
+        self.label_std = np.std(values)
+        
+        # Calculate histogram for weighting
+        hist, _ = np.histogram(values.flatten(), bins=10, range=(0, 1))
+        self.label_weights = 1.0 / (hist + 1)
+        self.label_weights = self.label_weights / np.sum(self.label_weights)
+        
+        print("Label statistics:")
+        print(f"Mean: {self.label_mean:.3f}")
+        print(f"Std: {self.label_std:.3f}")
+        print(f"Training with {len(self)} samples")
+    
     def __len__(self):
-        return len(self.image_paths)
+        return len(self.valid_indices)
     
     def __getitem__(self, idx):
-        # Load raw UYVY image (520x480 bytes)
-        with open(self.image_paths[idx], 'rb') as f:
-            raw_data = np.frombuffer(f.read(), dtype=np.uint8).reshape(520, 480)
+        real_idx = self.valid_indices[idx]
+        yuv = self.preprocessed_images[real_idx]  # Shape: (3, 240, 240)
+        yuv = yuv.transpose(1, 2, 0).astype(np.uint8)  # Convert to HWC for OpenCV
         
-        # Crop center 240 rows (original height 520)
-        cropped = raw_data[140:380, :]  # 240x480
+        # Data augmentation
+        if self.training:
+            if np.random.random() < 0.5:
+                angle = np.random.choice([5, 85, 95, 175, 185, 265, 275, 355])
+                yuv = rotate_image(yuv.transpose(2, 0, 1), angle).transpose(1, 2, 0)
+            
+            if np.random.random() < 0.5:
+                brightness = np.random.uniform(-30, 30)
+                contrast = np.random.uniform(-0.3, 0.3)
+                yuv = adjust_brightness_contrast(yuv.transpose(2, 0, 1), brightness, contrast).transpose(1, 2, 0)
         
-        # Convert to YUV and downscale
-        yuv = reshape_uyvy_to_yuv(cropped, self.downscale_factor)
+        # Downscale
+        if self.downscale_factor > 1:
+            h, w = yuv.shape[:2]
+            new_size = (w // self.downscale_factor, h // self.downscale_factor)
+            yuv = cv2.resize(yuv, new_size, interpolation=cv2.INTER_AREA)
+        
+        # Normalize
+        yuv = yuv.transpose(2, 0, 1).astype(np.float32)
+        yuv[0] /= 255.0  # Y channel
+        yuv[1:] = yuv[1:] / 255.0 - 0.5  # U/V
         
         return (
-            torch.from_numpy(yuv.copy()).float(),
-            torch.tensor(self.labels[idx], dtype=torch.float32)
+            torch.from_numpy(yuv).float(),
+            torch.tensor(self.danger_values[real_idx], dtype=torch.float32)
         )
+    
+    def get_temporal_pair(self, idx, window=1):
+        """
+        Get temporally adjacent frames for time series validation
+        
+        Args:
+            idx: Index of current frame
+            window: Number of frames to include before/after
+        
+        Returns:
+            list: List of (image, label) pairs for temporal sequence
+        """
+        real_idx = self.valid_indices[idx]
+        base_path = Path(self.image_paths[real_idx])
+        
+        # Try to find adjacent frames
+        sequence = []
+        current_frame_num = int(base_path.stem.split('_')[-1])
+        
+        for offset in range(-window, window + 1):
+            target_frame = current_frame_num + offset
+            target_path = base_path.parent / f"{base_path.stem[:-len(str(current_frame_num))]}{target_frame}{base_path.suffix}"
+            
+            if target_path.exists() and str(target_path) in self.image_paths:
+                target_idx = self.image_paths.index(str(target_path))
+                if target_idx in self.valid_indices:
+                    sequence.append(self.__getitem__(self.valid_indices.index(target_idx)))
+        
+        return sequence
+    
+    def visualize_processing(self, idx, num_augmented=3, save_path=None):
+        """
+        Visualize original and augmented images with their YUV channels and danger values
+        
+        Args:
+            idx: Index of image to visualize
+            num_augmented: Number of augmented versions to show
+            save_path: If provided, save visualization to this path
+        """
+        real_idx = self.valid_indices[idx]
+        
+        # Load original image
+        orig_img = cv2.imread(self.image_paths[real_idx])
+        orig_rotated = cv2.rotate(orig_img, cv2.ROTATE_90_CLOCKWISE)
+        
+        # Get center crop
+        h, w = orig_rotated.shape[:2]
+        y_start = (h - 240) // 2
+        x_start = (w - 240) // 2
+        orig_cropped = orig_rotated[y_start:y_start+240, x_start:x_start+240]
+        
+        # Create figure
+        num_cols = 4  # Original + YUV channels
+        num_rows = num_augmented + 1  # Original + augmented versions
+        plt.figure(figsize=(15, 4*num_rows))
+        
+        # Function to plot single image set (original/augmented + YUV channels)
+        def plot_image_set(img_bgr, row, title):
+            # Convert BGR to YUV
+            img_yuv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2YUV)
+            
+            # Plot BGR image
+            plt.subplot(num_rows, num_cols, row * num_cols + 1)
+            plt.imshow(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+            plt.title(f'{title} (RGB)')
+            plt.axis('off')
+            
+            # Plot YUV channels
+            channel_names = ['Y channel', 'U channel', 'V channel']
+            for i in range(3):
+                plt.subplot(num_rows, num_cols, row * num_cols + i + 2)
+                plt.imshow(img_yuv[:, :, i], cmap='gray')
+                plt.title(f'{title} ({channel_names[i]})')
+                plt.axis('off')
+        
+        # Plot original image and its channels
+        plot_image_set(orig_cropped, 0, 'Original')
+        
+        # Get danger values
+        danger_values = self.danger_values[real_idx]
+        
+        # Plot danger values on the first row
+        plt.figtext(0.02, 0.98 - 0/num_rows, 
+                    f'Danger values: {", ".join([f"{x:.2f}" for x in danger_values])}',
+                    fontsize=10)
+        
+        # Generate and plot augmented versions
+        for i in range(num_augmented):
+            # Temporarily set training mode to True to enable augmentation
+            orig_training = self.training
+            self.training = True
+            
+            # Get augmented image
+            aug_img, _ = self.__getitem__(idx)
+            
+            # Convert tensor back to BGR for visualization
+            aug_img = aug_img.numpy().transpose(1, 2, 0)  # CHW -> HWC
+            # Denormalize
+            aug_img[..., 0] = aug_img[..., 0] * 255.0  # Y channel
+            aug_img[..., 1:] = (aug_img[..., 1:] + 0.5) * 255.0  # UV channels
+            aug_img = aug_img.astype(np.uint8)
+            aug_img_bgr = cv2.cvtColor(aug_img, cv2.COLOR_YUV2BGR)
+            
+            # Plot augmented image and its channels
+            plot_image_set(aug_img_bgr, i+1, f'Augmented {i+1}')
+            
+            # Reset training mode
+            self.training = orig_training
+        
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path)
+            plt.close()
+        else:
+            plt.show()
+
+    def visualize_batch(self, batch_size=4, save_path=None):
+        """
+        Visualize a batch of images and their labels
+        
+        Args:
+            batch_size: Number of images to visualize
+            save_path: If provided, save visualization to this path
+        """
+        indices = np.random.choice(len(self), batch_size, replace=False)
+        
+        plt.figure(figsize=(15, 4*batch_size))
+        for i, idx in enumerate(indices):
+            img, label = self[idx]
+            
+            # Convert tensor to numpy and denormalize
+            img = img.numpy().transpose(1, 2, 0)  # CHW -> HWC
+            img[..., 0] = img[..., 0] * 255.0  # Y channel
+            img[..., 1:] = (img[..., 1:] + 0.5) * 255.0  # UV channels
+            img = img.astype(np.uint8)
+            
+            # Convert YUV to BGR to RGB for display
+            img_bgr = cv2.cvtColor(img, cv2.COLOR_YUV2BGR)
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            
+            plt.subplot(batch_size, 1, i+1)
+            plt.imshow(img_rgb)
+            plt.title(f'Danger values: {", ".join([f"{x:.2f}" for x in label.numpy()])}')
+            plt.axis('off')
+        
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path)
+            plt.close()
+        else:
+            plt.show()
 
 def reshape_uyvy_to_yuv(uyvy_data, downscale_factor=2):
     """Process 240x480 UYVY input (240x240 image)"""
@@ -176,131 +368,34 @@ def test_rotations():
         print(f"Padding: {result['padding_percent']:.1f}%")
         print("---")
 
-def prepare_datasets_for_configs(configs, data_dir):
-    # Create a dictionary to store unique dataset configurations
+def prepare_datasets_for_configs(configs, h5_path, debug=False):
+    """Create dataset configurations for each unique set of parameters"""
     dataset_configs = {}
     
     for config in configs:
-        # Create a key based on dataset-specific parameters
+        # Create key based on parameters that affect dataset generation
         dataset_key = (
-            config['num_rotations'],
-            config['augment_brightness_contrast'],
-            config['downscale_factor']
+            config['downscale_factor'],
+            config['augment_brightness_contrast']  # Determines if training mode is enabled
         )
         
-        # Only prepare dataset if we haven't seen these parameters before
         if dataset_key not in dataset_configs:
             print(f"\nPreparing dataset with parameters:")
-            print(f"- num_rotations: {config['num_rotations']}")
-            print(f"- augment_brightness_contrast: {config['augment_brightness_contrast']}")
             print(f"- downscale_factor: {config['downscale_factor']}")
+            print(f"- training_mode: {config['augment_brightness_contrast']}")
             
-            images, labels, sources = prepare_dataset(
-                data_dir,
-                num_rotations=config['num_rotations'],
-                augment_brightness_contrast=config['augment_brightness_contrast'],
-                downscale_factor=config['downscale_factor']
+            # Create the dataset instance
+            dataset = DangerDataset(
+                h5_path=h5_path,
+                downscale_factor=config['downscale_factor'],
+                training=config['augment_brightness_contrast'],
+                debug=debug
             )
             
-            dataset_configs[dataset_key] = (images, labels, sources)
+            # Store the dataset instance
+            dataset_configs[dataset_key] = dataset
     
     return dataset_configs
-
-def prepare_dataset(base_dir, num_rotations=2, augment_brightness_contrast=True, downscale_factor=2, debug=False):
-    print("Loading and preprocessing dataset...")
-    
-    # Define allowed rotation angles (5 degrees around multiples of 90)
-    rotation_angles = [5, 85, 95, 175, 185, 265, 275, 355]
-    
-    boundaries_dir = os.path.join(base_dir, 'boundaries')
-    confirmed_floor_dir = os.path.join(base_dir, 'confirmed_floor')
-    unlabeled_dir = os.path.join(base_dir, 'unlabeled')
-    
-    images = []
-    labels = []
-    sources = []
-    
-    if debug:
-        end = 10
-    else:
-        end = None
-    
-    # Process images from boundaries directory
-    for img_path in tqdm(os.listdir(boundaries_dir)[0:end], desc="Processing boundaries"):
-        with open(os.path.join(boundaries_dir, img_path), 'rb') as f:
-            raw_data = np.frombuffer(f.read(), dtype=np.uint8).reshape(120, 240)
-        
-        img = reshape_uyvy_to_yuv(raw_data, downscale_factor=downscale_factor)
-        
-        # Generate regression targets using danger_level function
-        # Assuming you have a function to generate 5 targets
-        regression_targets = generate_regression_targets(img)  # Implement this function
-        
-        # Add original image
-        images.append(img)
-        labels.append(regression_targets)
-        sources.append('boundaries')
-        
-        # Pick num_rotations random angles and augment brightness/contrast
-        for angle in np.random.choice(rotation_angles, num_rotations, replace=False):
-            augmented = img.copy()
-            rotated_img = rotate_image(augmented, angle)
-            
-            if augment_brightness_contrast:
-                brightness = np.random.uniform(-30, 30)  # Still use pixel values for easier understanding
-                contrast = np.random.uniform(-0.3, 0.3)
-                rotated_img = adjust_brightness_contrast(rotated_img, brightness, contrast)
-            
-            images.append(rotated_img)
-            labels.append(regression_targets)  # Use the same targets for augmented images
-            sources.append('boundaries')
-    
-    # Process confirmed_floor and unlabeled
-    for directory, label in [(confirmed_floor_dir, 0), (unlabeled_dir, 0)]:
-        for img_path in tqdm(os.listdir(directory)[0:end], desc=f"Processing {os.path.basename(directory)}"):
-            with open(os.path.join(directory, img_path), 'rb') as f:
-                raw_data = np.frombuffer(f.read(), dtype=np.uint8).reshape(120, 240)
-            
-            img = reshape_uyvy_to_yuv(raw_data, downscale_factor=downscale_factor)
-            regression_targets = generate_regression_targets(img)  # Implement this function
-            images.append(img)
-            labels.append(regression_targets)
-            sources.append(os.path.basename(directory))
-
-    # Convert lists to numpy arrays
-    images = np.array(images)
-    labels = np.array(labels)
-    sources = np.array(sources)
-
-    print("Label distribution:", dict(zip(*np.unique(labels, return_counts=True))))
-    
-    # Shuffle all arrays together
-    shuffle_idx = np.random.permutation(len(labels))
-    images = images[shuffle_idx]
-    labels = labels[shuffle_idx]
-    sources = sources[shuffle_idx]
-
-    return np.array(images), np.array(labels), np.array(sources)
-
-def generate_regression_targets(image):
-    # Assuming image is of shape (3, height, width)
-    height, width = image.shape[1], image.shape[2]
-    
-    # Split the image into 5 columns
-    column_width = width // 5
-    targets = []
-    
-    for i in range(5):
-        x1 = i * column_width
-        x2 = (i + 1) * column_width
-        y1 = 0
-        y2 = height
-        
-        # Calculate danger level for this column
-        danger = danger_level(x1, x2, y1, y2, label=1, width=width, height=height)
-        targets.append(danger)
-    
-    return np.array(targets)
 
 class BorderDataset(Dataset):
     def __init__(self, images, labels):

@@ -7,6 +7,7 @@ import torch.nn as nn
 from torch.quantization import get_default_qconfig
 from model_raw import ObstacleDetector
 import torch.nn.functional as F
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 
 class EarlyStopping:
     def __init__(self, patience=5, min_delta=0):
@@ -39,118 +40,44 @@ class TrainingMetrics:
         self.train_mae = []
         self.val_mae = []
         self.learning_rates = []
-        
-    def add_metrics(self, train_loss, val_loss, train_mse=None, val_mse=None, train_mae=None, val_mae=None, lr=None):
-        self.train_losses.append(float(train_loss))
-        self.val_losses.append(float(val_loss))
-        if train_mse is not None:
-            self.train_mse.append(float(train_mse))
-        if val_mse is not None:
-            self.val_mse.append(float(val_mse))
-        if train_mae is not None:
-            self.train_mae.append(float(train_mae))
-        if val_mae is not None:
-            self.val_mae.append(float(val_mae))
-        if lr is not None:
-            self.learning_rates.append(float(lr))
-    
-    def to_dict(self):
-        metrics_dict = {
-            'train_losses': self.train_losses,
-            'val_losses': self.val_losses,
-            'train_mse': self.train_mse,
-            'val_mse': self.val_mse,
-            'train_mae': self.train_mae,
-            'val_mae': self.val_mae,
-            'learning_rates': self.learning_rates,
-        }
-        return metrics_dict
-    
-    def print_metrics(self):
-        print(f"Train Loss: {self.train_losses[-1]:.4f}, Val Loss: {self.val_losses[-1]:.4f}")
-        print(f"Train MSE: {self.train_mse[-1]:.4f}, Val MSE: {self.val_mse[-1]:.4f}")
-        print(f"Train MAE: {self.train_mae[-1]:.4f}, Val MAE: {self.val_mae[-1]:.4f}")
-        print(f"Learning Rate: {self.learning_rates[-1]:.6f}")
-    
-    @classmethod
-    def from_dict(cls, data):
-        metrics = cls()
-        metrics.train_losses = data['train_losses']
-        metrics.val_losses = data['val_losses']
-        metrics.train_accuracies = data['train_accuracies']
-        metrics.val_accuracies = data['val_accuracies']
-        metrics.learning_rates = data['learning_rates']
-        return metrics
-    
-    def plot_metrics(self, save_path=None):
-        plt.figure(figsize=(15, 5))
-        
-        # Plot losses
-        plt.subplot(1, 2, 1)
-        plt.plot(self.train_losses, label='Train Loss')
-        plt.plot(self.val_losses, label='Val Loss')
-        plt.title('Loss over epochs')
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.legend()
-        
-        # Plot accuracies
-        plt.subplot(1, 2, 2)
-        plt.plot(self.train_accuracies, label='Train Accuracy')
-        plt.plot(self.val_accuracies, label='Val Accuracy')
-        plt.title('Accuracy over epochs')
-        plt.xlabel('Epoch')
-        plt.ylabel('Accuracy')
-        plt.legend()
-        
-        if save_path:
-            plt.savefig(save_path)
-        plt.close()
-    
-    
-    def save_metrics(self, save_path):
-        with open(save_path, 'w') as f:
-            json.dump(self.to_dict(), f, indent=2)
-    
-    @classmethod
-    def load_metrics(cls, load_path):
-        with open(load_path, 'r') as f:
-            data = json.load(f)
-        return cls.from_dict(data)
 
-from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
+    def add_metrics(self, train_loss, val_loss, train_mse, val_mse, train_mae, val_mae, lr):
+        self.train_losses.append(train_loss)
+        self.val_losses.append(val_loss)
+        self.train_mse.append(train_mse)
+        self.val_mse.append(val_mse)
+        self.train_mae.append(train_mae)
+        self.val_mae.append(val_mae)
+        self.learning_rates.append(lr)
+
 
 def evaluate_model(model, dataloader, device):
     model.eval()
-    total_loss = 0
-    total_mse = 0
-    total_mae = 0
-    criterion = nn.MSELoss()
+    total_mse = 0.0
+    total_mae = 0.0
+    total_huber = 0.0
+    huber_criterion = nn.HuberLoss(reduction='mean', delta=0.1)
     
     with torch.no_grad():
         for images, labels in dataloader:
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
-
-            # Calculate loss
-            loss = criterion(outputs, labels)
-            total_loss += loss.item()
             
-            # Calculate MSE and MAE
-            mse = F.mse_loss(outputs, labels).item()
-            mae = F.l1_loss(outputs, labels).item()
+            # Calculate regression metrics
+            mse = F.mse_loss(outputs, labels)
+            mae = F.l1_loss(outputs, labels)
+            huber = huber_criterion(outputs, labels)
             
-            total_mse += mse
-            total_mae += mae
+            total_mse += mse.item()
+            total_mae += mae.item()
+            total_huber += huber.item()
     
-    # Average metrics over the dataset
-    metrics = {
-        'val_loss': total_loss / len(dataloader),
+    return {
+        'val_loss': total_huber / len(dataloader),  # Use Huber as primary val_loss
         'val_mse': total_mse / len(dataloader),
         'val_mae': total_mae / len(dataloader),
+        'val_huber': total_huber / len(dataloader)
     }
-    
-    return metrics
 
 def save_checkpoint(model, optimizer, scheduler, epoch, metrics, path, config):
     torch.save({
