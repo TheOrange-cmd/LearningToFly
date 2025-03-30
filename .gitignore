@@ -233,6 +233,7 @@ tests/results/*
 /FrontCamDetector/dataset
 /FrontCamDetector/dataset_uyvy
 /FrontCamDetector/front_images
+<<<<<<< Updated upstream
 /BottomCamDetector/benchmark_logs
 /BottomCamDetector/promising_models_front
 /utils/converted_models
@@ -253,3 +254,15 @@ utils/model_benchmark_results_20250324_142852/benchmark_summary.txt
 /utils/promising_models_downscale_4
 /camera_debug
 /utils/images
+=======
+/FrontCamDetector/experiments_cv
+/FrontCamDetector/results_raw
+/FrontCamDetector/promising_models
+/FrontCamDetector/promising_models
+/FrontCamDetector/logs
+/FrontCamDetector/prediction_visualizations
+/FrontCamDetector/promising_models
+/FrontCamDetector/promising_models_2
+/FrontCamDetector/promising_models_3
+/FrontCamDetector/promising_models
+>>>>>>> Stashed changes
